@@ -22,17 +22,22 @@ function parseCSV(raw: string): SheetRow[] {
   const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
 
-  // Parse header row
-  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  // Parse header row using the same quoted-CSV parser as data rows
+  const headers = splitCSVLine(lines[0]).map((h) => h.trim().toLowerCase());
 
-  const colIdx = (name: string) => headers.findIndex((h) => h.includes(name));
+  // Prefer exact match, fall back to substring match
+  const colIdx = (name: string) => {
+    const exact = headers.findIndex((h) => h === name);
+    return exact >= 0 ? exact : headers.findIndex((h) => h.includes(name));
+  };
+
   const iLocation = colIdx('location');
   const iSetName = colIdx('set name');
   const iGrouping = colIdx('grouping');
   const iAcres = colIdx('acres');
   const iGpm = colIdx('gpm');
-  const iBlock = colIdx('block') === colIdx('block description') ? colIdx('block') : colIdx('block');
-  const iBlockDesc = headers.findIndex((h) => h.includes('block description'));
+  const iBlock = colIdx('block');
+  const iBlockDesc = colIdx('block description');
 
   const rows: SheetRow[] = [];
 

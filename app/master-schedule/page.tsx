@@ -29,7 +29,7 @@ export default function MasterSchedulePage() {
       .catch(() => setLoading(false));
   }, [weekStart]);
 
-  const locations = useMemo(() => [...new Set(entries.map((e) => e.location))].sort(), [entries]);
+  const locations = useMemo(() => [...new Set(entries.map((e) => e.location).filter(Boolean))].sort(), [entries]);
 
   // Build a map: setName → dayOfWeek → entries
   const scheduleMap = useMemo(() => {

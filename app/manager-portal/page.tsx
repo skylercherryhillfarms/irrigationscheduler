@@ -23,6 +23,7 @@ export default function ManagerPortalPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [filterGroup, setFilterGroup] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
   const [setsLoading, setSetsLoading] = useState(true);
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [copyLoading, setCopyLoading] = useState(false);
@@ -58,17 +59,19 @@ export default function ManagerPortalPage() {
 
   useEffect(() => { loadSchedule(); }, [loadSchedule]);
 
-  // Groups for filter
-  const groups = useMemo(() => [...new Set(allSets.map((s) => s.grouping).filter(Boolean))].sort(), [allSets]);
+  // Groups and locations for filters
+  const groups = useMemo(() => [...new Set(allSets.map((s) => s.grouping.trim()).filter(Boolean))].sort(), [allSets]);
+  const locations = useMemo(() => [...new Set(allSets.map((s) => s.location.trim()).filter(Boolean))].sort(), [allSets]);
 
   // Filtered sidebar sets
   const filteredSets = useMemo(() => {
     return allSets.filter((s) => {
       if (search && !s.setName.toLowerCase().includes(search.toLowerCase()) && !s.location.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filterGroup && s.grouping !== filterGroup) return false;
+      if (filterGroup && s.grouping.trim() !== filterGroup) return false;
+      if (filterLocation && s.location.trim() !== filterLocation) return false;
       return true;
     });
-  }, [allSets, search, filterGroup]);
+  }, [allSets, search, filterGroup, filterLocation]);
 
   // Toggle select a set
   const toggleSelect = (setName: string) => {
@@ -237,18 +240,28 @@ export default function ManagerPortalPage() {
               onChange={(e) => setSearch(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
             />
-            <select
-              value={filterGroup}
-              onChange={(e) => setFilterGroup(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
-            >
-              <option value="">All Groups</option>
-              {groups.map((g) => <option key={g} value={g}>{g}</option>)}
-            </select>
+            <div className="flex gap-2">
+              <select
+                value={filterLocation}
+                onChange={(e) => setFilterLocation(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+              >
+                <option value="">All Locations</option>
+                {locations.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+              <select
+                value={filterGroup}
+                onChange={(e) => setFilterGroup(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+              >
+                <option value="">All Groups</option>
+                {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
             <div className="flex gap-2 text-xs">
               <button onClick={selectAll} className="text-green-700 hover:underline">Select all</button>
               <span className="text-gray-300">|</span>
-              <button onClick={clearAll} className="text-gray-500 hover:underline">Clear</button>
+              <button onClick={() => { clearAll(); setFilterLocation(''); setFilterGroup(''); setSearch(''); }} className="text-gray-500 hover:underline">Clear all</button>
               {selected.size > 0 && (
                 <span className="ml-auto text-green-700 font-semibold">{selected.size} selected</span>
               )}
