@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import NavBar from '@/components/NavBar';
 import ScheduleModal from '@/components/ScheduleModal';
-import { ScheduleEntry, SheetRow, getLocationColor, DAYS } from '@/lib/types';
+import { ScheduleEntry, SheetRow, getLocationColor, getGroupingColor, DAYS } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
 import { getWeekStart, getWeekDays, prevWeek, nextWeek, formatWeekRange } from '@/lib/dates';
 import { format } from 'date-fns';
 
@@ -28,25 +29,29 @@ export default function ManagerPortalPage() {
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [copyLoading, setCopyLoading] = useState(false);
   const [copyMsg, setCopyMsg] = useState('');
+  const [copyLocation, setCopyLocation] = useState('');
 
   // Modal state
-  const [modal, setModal] = useState<{ dayIndex: number } | null>(null);
+  const [modal, setModal] = useState<{ dayIndex: number; defaultShift?: 'AM' | 'PM' | 'Both' } | null>(null);
 
   // Drag state
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dragOverDay, setDragOverDay] = useState<number | null>(null);
+  const [dragOverShift, setDragOverShift] = useState<{ dayIndex: number; shift: 'AM' | 'PM' } | null>(null);
   const dragRef = useRef<DragState | null>(null);
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
   // Fetch sets from Google Sheet
-  useEffect(() => {
+  const loadSets = useCallback((force = false) => {
     setSetsLoading(true);
-    fetch('/api/sets')
+    fetch(force ? '/api/sets?refresh=1' : '/api/sets')
       .then((r) => r.json())
       .then((data) => { setAllSets(Array.isArray(data) ? data : []); setSetsLoading(false); })
       .catch(() => setSetsLoading(false));
   }, []);
+
+  useEffect(() => { loadSets(); }, [loadSets]);
 
   // Fetch schedule for current week
   const loadSchedule = useCallback(() => {
@@ -59,9 +64,23 @@ export default function ManagerPortalPage() {
 
   useEffect(() => { loadSchedule(); }, [loadSchedule]);
 
+  // Realtime: reload when another user changes schedule_entries for this week
+  useEffect(() => {
+    const channel = supabase
+      .channel(`manager-schedule-${weekStart}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule_entries' }, () => {
+        loadSchedule();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [weekStart, loadSchedule]);
+
   // Groups and locations for filters
-  const groups = useMemo(() => [...new Set(allSets.map((s) => s.grouping.trim()).filter(Boolean))].sort(), [allSets]);
   const locations = useMemo(() => [...new Set(allSets.map((s) => s.location.trim()).filter(Boolean))].sort(), [allSets]);
+  const groups = useMemo(() => {
+    const source = filterLocation ? allSets.filter((s) => s.location.trim() === filterLocation) : allSets;
+    return [...new Set(source.map((s) => s.grouping.trim()).filter(Boolean))].sort();
+  }, [allSets, filterLocation]);
 
   // Filtered sidebar sets
   const filteredSets = useMemo(() => {
@@ -73,30 +92,33 @@ export default function ManagerPortalPage() {
     });
   }, [allSets, search, filterGroup, filterLocation]);
 
+  // Unique key per set (set names are not unique across locations)
+  const setKey = (s: SheetRow) => `${s.location}::${s.setName}`;
+
   // Toggle select a set
-  const toggleSelect = (setName: string) => {
+  const toggleSelect = (key: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(setName)) next.delete(setName);
-      else next.add(setName);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
 
-  const selectAll = () => setSelected(new Set(filteredSets.map((s) => s.setName)));
+  const selectAll = () => setSelected(new Set(filteredSets.map(setKey)));
   const clearAll = () => setSelected(new Set());
 
   // Get sets to schedule: if dragging a set that's in selection, use selection; otherwise just that set
-  const getSetsToSchedule = (draggedSetName: string): SheetRow[] => {
-    if (selected.has(draggedSetName) && selected.size > 1) {
-      return allSets.filter((s) => selected.has(s.setName));
+  const getSetsToSchedule = (draggedKey: string): SheetRow[] => {
+    if (selected.has(draggedKey) && selected.size > 1) {
+      return allSets.filter((s) => selected.has(setKey(s)));
     }
-    return allSets.filter((s) => s.setName === draggedSetName);
+    return allSets.filter((s) => setKey(s) === draggedKey);
   };
 
   // --- Drag handlers ---
-  const handleDragStart = (e: React.DragEvent, setName: string) => {
-    const setsToSchedule = getSetsToSchedule(setName);
+  const handleDragStart = (e: React.DragEvent, key: string) => {
+    const setsToSchedule = getSetsToSchedule(key);
     e.dataTransfer.setData('sets', JSON.stringify(setsToSchedule));
     e.dataTransfer.effectAllowed = 'copy';
   };
@@ -157,14 +179,48 @@ export default function ManagerPortalPage() {
     loadSchedule();
   };
 
+  const handleMoveEntry = async (id: string, dayIndex: number, shift: 'AM' | 'PM') => {
+    await fetch(`/api/schedule?id=${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ day_of_week: dayIndex, shift }),
+    });
+    loadSchedule();
+  };
+
+  const handleDropOnShift = (e: React.DragEvent, dayIndex: number, shift: 'AM' | 'PM') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverShift(null);
+    setDragOverDay(null);
+
+    // Existing scheduled entry being moved
+    const entryData = e.dataTransfer.getData('existingEntry');
+    if (entryData) {
+      try {
+        const entry: ScheduleEntry = JSON.parse(entryData);
+        handleMoveEntry(entry.id, dayIndex, shift);
+      } catch {}
+      return;
+    }
+
+    // Sidebar set being dropped — open modal with shift pre-filled
+    let setsToSchedule: SheetRow[] = [];
+    try { setsToSchedule = JSON.parse(e.dataTransfer.getData('sets')); } catch { return; }
+    if (setsToSchedule.length === 0) return;
+    setModal({ dayIndex, defaultShift: shift });
+    dragRef.current = { sets: setsToSchedule, startX: 0, startY: 0, currentX: 0, currentY: 0, active: false };
+  };
+
   const handleCopyWeek = async () => {
+    if (!copyLocation) { setCopyMsg('Select a location to copy'); return; }
     setCopyLoading(true);
     setCopyMsg('');
     try {
       const res = await fetch('/api/schedule/copy-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weekStart }),
+        body: JSON.stringify({ weekStart, location: copyLocation }),
       });
       const data = await res.json();
       if (data.error) {
@@ -180,25 +236,33 @@ export default function ManagerPortalPage() {
     }
   };
 
-  // Build day → entries map
+  // Lookup map: "location::setName" → SheetRow (for block/blockDescription)
+  const setsMap = useMemo(() => {
+    const map = new Map<string, SheetRow>();
+    for (const s of allSets) map.set(`${s.location}::${s.setName}`, s);
+    return map;
+  }, [allSets]);
+
+  // Build day → entries map, filtered by location if a filter is active
   const dayEntriesMap = useMemo(() => {
     const map = new Map<number, ScheduleEntry[]>();
     for (let i = 0; i < 7; i++) map.set(i, []);
-    for (const e of entries) {
+    const visible = filterLocation ? entries.filter((e) => e.location === filterLocation) : entries;
+    for (const e of visible) {
       map.get(e.day_of_week)?.push(e);
     }
     return map;
-  }, [entries]);
+  }, [entries, filterLocation]);
 
-  // Totals per day per shift
+  // Totals per day per shift — sorted by location
   const getDayShiftEntries = (dayIndex: number, shift: 'AM' | 'PM') => {
-    return (dayEntriesMap.get(dayIndex) ?? []).filter(
-      (e) => e.shift === shift || e.shift === 'Both'
-    );
+    return (dayEntriesMap.get(dayIndex) ?? [])
+      .filter((e) => e.shift === shift || e.shift === 'Both')
+      .sort((a, b) => a.location.localeCompare(b.location));
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#f8faf4' }}>
+    <div className="h-screen overflow-hidden flex flex-col" style={{ backgroundColor: '#f8faf4' }}>
       <NavBar />
 
       {/* Page header */}
@@ -212,23 +276,35 @@ export default function ManagerPortalPage() {
             <button onClick={() => setWeekStart(prevWeek(weekStart))} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">‹</button>
             <span className="font-semibold">{formatWeekRange(weekStart)}</span>
             <button onClick={() => setWeekStart(nextWeek(weekStart))} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">›</button>
-            <button onClick={() => setWeekStart(getWeekStart())} className="px-3 py-1.5 text-xs rounded-md bg-white/20 hover:bg-white/30 transition-colors">Today</button>
+            <button onClick={() => setWeekStart(getWeekStart())} disabled={weekStart === getWeekStart()} className="px-3 py-1.5 text-xs rounded-md bg-white/20 hover:bg-white/30 transition-colors disabled:opacity-40 disabled:cursor-default">Today</button>
           </div>
           <div className="flex items-center gap-2">
+            <select
+              value={copyLocation}
+              onChange={(e) => setCopyLocation(e.target.value)}
+              className="border border-white/30 rounded-lg px-2 py-2 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+            >
+              <option value="" className="text-gray-800">Select location…</option>
+              {locations.map((l) => <option key={l} value={l} className="text-gray-800">{l}</option>)}
+            </select>
             <button
               onClick={handleCopyWeek}
-              disabled={copyLoading}
+              disabled={copyLoading || !copyLocation}
               className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-medium transition-colors disabled:opacity-50"
             >
               {copyLoading ? 'Copying…' : '📋 Copy to Next Week'}
             </button>
-            {copyMsg && <span className="text-green-200 text-xs">{copyMsg}</span>}
+            {copyMsg && (
+              <span className={`text-xs ${copyMsg.startsWith('Error') ? 'text-red-300' : 'text-green-200'}`}>
+                {copyMsg}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
       {/* Main content: sidebar + calendar */}
-      <div className="flex-1 flex overflow-hidden" style={{ height: 'calc(100vh - 130px)' }}>
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* SIDEBAR */}
         <aside className="w-72 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
@@ -243,7 +319,7 @@ export default function ManagerPortalPage() {
             <div className="flex gap-2">
               <select
                 value={filterLocation}
-                onChange={(e) => setFilterLocation(e.target.value)}
+                onChange={(e) => { setFilterLocation(e.target.value); setFilterGroup(''); }}
                 className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
               >
                 <option value="">All Locations</option>
@@ -262,6 +338,10 @@ export default function ManagerPortalPage() {
               <button onClick={selectAll} className="text-green-700 hover:underline">Select all</button>
               <span className="text-gray-300">|</span>
               <button onClick={() => { clearAll(); setFilterLocation(''); setFilterGroup(''); setSearch(''); }} className="text-gray-500 hover:underline">Clear all</button>
+              <span className="text-gray-300">|</span>
+              <button onClick={() => loadSets(true)} disabled={setsLoading} className="text-blue-600 hover:underline disabled:opacity-50" title="Re-fetch sets from Google Sheet">
+                {setsLoading ? 'Loading…' : '↻ Refresh'}
+              </button>
               {selected.size > 0 && (
                 <span className="ml-auto text-green-700 font-semibold">{selected.size} selected</span>
               )}
@@ -276,13 +356,14 @@ export default function ManagerPortalPage() {
             ) : (
               filteredSets.map((s) => {
                 const colors = getLocationColor(s.location);
-                const isSelected = selected.has(s.setName);
+                const key = setKey(s);
+                const isSelected = selected.has(key);
                 return (
                   <div
-                    key={s.setName}
+                    key={key}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, s.setName)}
-                    onClick={() => toggleSelect(s.setName)}
+                    onDragStart={(e) => handleDragStart(e, key)}
+                    onClick={() => toggleSelect(key)}
                     className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-grab active:cursor-grabbing transition-colors select-none ${
                       isSelected
                         ? 'bg-green-50 border border-green-300'
@@ -292,22 +373,32 @@ export default function ManagerPortalPage() {
                     <input
                       type="checkbox"
                       checked={isSelected}
-                      onChange={() => toggleSelect(s.setName)}
+                      onChange={() => toggleSelect(key)}
                       onClick={(e) => e.stopPropagation()}
                       className="rounded accent-green-700 flex-shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-800 truncate">{s.setName}</div>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <span className={`text-xs px-1.5 py-0 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-sm font-medium text-gray-800 truncate">{s.setName}</span>
+                        <span className={`flex-shrink-0 text-[10px] px-1.5 py-0 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
                           {s.location}
                         </span>
-                        {s.grouping && <span className="text-xs text-gray-400 truncate">{s.grouping}</span>}
+                        {s.grouping && (() => {
+                          const gc = getGroupingColor(s.grouping);
+                          return gc
+                            ? <span className={`flex-shrink-0 text-[10px] px-1.5 py-0 rounded-full border leading-tight ${gc.bg} ${gc.text} ${gc.border}`}>{s.grouping}</span>
+                            : <span className="flex-shrink-0 text-[10px] text-gray-400">{s.grouping}</span>;
+                        })()}
                       </div>
+                      {(s.block || s.blockDescription) && (
+                        <div className="text-[10px] text-gray-400 truncate leading-tight mt-0.5">
+                          {[s.block, s.blockDescription].filter(Boolean).join(' – ')}
+                        </div>
+                      )}
                     </div>
                     <div className="text-xs text-gray-400 flex-shrink-0 text-right">
-                      {s.gpm != null && <div>{s.gpm} GPM</div>}
-                      {s.acres != null && <div>{s.acres} ac</div>}
+                      {s.location === 'Genola' && s.gpm != null && <div>{s.gpm} GPM</div>}
+                      {s.location === 'Charlies' && s.acres != null && <div>{s.acres} ac</div>}
                     </div>
                     <div className="text-gray-300 flex-shrink-0">⠿</div>
                   </div>
@@ -355,22 +446,38 @@ export default function ManagerPortalPage() {
                     <div className="flex-1 flex items-center justify-center text-gray-300 text-xs">…</div>
                   ) : (
                     <div className="flex-1 flex flex-col overflow-y-auto p-1 gap-1">
-                      {/* AM section */}
-                      <ShiftSection
-                        label="AM"
-                        entries={amEntries}
-                        onDelete={handleDeleteEntry}
-                        gpmTotal={genolaGPM_AM > 0 ? genolaGPM_AM : null}
-                        acresTotal={charliesAcres_AM > 0 ? charliesAcres_AM : null}
-                      />
-                      {/* PM section */}
-                      <ShiftSection
-                        label="PM"
-                        entries={pmEntries}
-                        onDelete={handleDeleteEntry}
-                        gpmTotal={genolaGPM_PM > 0 ? genolaGPM_PM : null}
-                        acresTotal={charliesAcres_PM > 0 ? charliesAcres_PM : null}
-                      />
+                      {/* AM drop zone */}
+                      <div
+                        onDrop={(e) => handleDropOnShift(e, dayIndex, 'AM')}
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverShift({ dayIndex, shift: 'AM' }); }}
+                        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverShift(null); }}
+                        className={`min-h-[32px] rounded-lg transition-colors ${dragOverShift?.dayIndex === dayIndex && dragOverShift?.shift === 'AM' ? 'bg-sky-50 ring-1 ring-sky-300' : ''}`}
+                      >
+                        <ShiftSection
+                          label="AM"
+                          entries={amEntries}
+                          onDelete={handleDeleteEntry}
+                          gpmTotal={genolaGPM_AM > 0 ? genolaGPM_AM : null}
+                          acresTotal={charliesAcres_AM > 0 ? charliesAcres_AM : null}
+                          setsMap={setsMap}
+                        />
+                      </div>
+                      {/* PM drop zone */}
+                      <div
+                        onDrop={(e) => handleDropOnShift(e, dayIndex, 'PM')}
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverShift({ dayIndex, shift: 'PM' }); }}
+                        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverShift(null); }}
+                        className={`min-h-[32px] rounded-lg transition-colors ${dragOverShift?.dayIndex === dayIndex && dragOverShift?.shift === 'PM' ? 'bg-orange-50 ring-1 ring-orange-300' : ''}`}
+                      >
+                        <ShiftSection
+                          label="PM"
+                          entries={pmEntries}
+                          onDelete={handleDeleteEntry}
+                          gpmTotal={genolaGPM_PM > 0 ? genolaGPM_PM : null}
+                          acresTotal={charliesAcres_PM > 0 ? charliesAcres_PM : null}
+                          setsMap={setsMap}
+                        />
+                      </div>
 
                       {amEntries.length === 0 && pmEntries.length === 0 && (
                         <div className="flex-1 flex items-center justify-center text-gray-300 text-xs py-4">
@@ -392,6 +499,7 @@ export default function ManagerPortalPage() {
           sets={dragRef.current.sets}
           dayIndex={modal.dayIndex}
           weekStart={weekStart}
+          defaultShift={modal.defaultShift}
           onConfirm={handleModalConfirm}
           onClose={() => { setModal(null); dragRef.current = null; }}
         />
@@ -406,12 +514,14 @@ function ShiftSection({
   onDelete,
   gpmTotal,
   acresTotal,
+  setsMap,
 }: {
   label: 'AM' | 'PM';
   entries: ScheduleEntry[];
   onDelete: (id: string) => void;
   gpmTotal: number | null;
   acresTotal: number | null;
+  setsMap: Map<string, SheetRow>;
 }) {
   const labelStyle =
     label === 'AM'
@@ -423,28 +533,41 @@ function ShiftSection({
   return (
     <div className="rounded-lg border border-gray-100 overflow-hidden">
       <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
-      <div className="space-y-0.5 p-1">
+      <div className="space-y-px p-1">
         {entries.map((e) => {
           const colors = getLocationColor(e.location);
+          const setInfo = setsMap.get(`${e.location}::${e.set_name}`);
+          const block = setInfo?.block ?? '';
+          const blockDesc = setInfo?.blockDescription ?? '';
+          const fullTitle = [e.set_name, block, blockDesc, e.notes].filter(Boolean).join(' · ');
           return (
             <div
               key={e.id}
-              className="flex items-start gap-1 bg-gray-50 rounded px-1.5 py-1 group text-xs"
+              draggable
+              onDragStart={(ev) => {
+                ev.stopPropagation();
+                ev.dataTransfer.setData('existingEntry', JSON.stringify(e));
+                ev.dataTransfer.effectAllowed = 'move';
+              }}
+              className="flex items-center gap-1.5 bg-gray-50 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing"
+              title={fullTitle}
             >
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-800 leading-tight truncate">{e.set_name}</div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className={`text-xs px-1 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}>
-                    {e.location}
-                  </span>
-                </div>
-                {e.notes?.trim() && (
-                  <div className="text-purple-700 text-xs mt-0.5 truncate" title={e.notes}>{e.notes}</div>
-                )}
-              </div>
+              <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
+                {e.location}
+              </span>
+              <span className="flex-shrink-0 text-xs font-medium text-gray-800">{e.set_name}</span>
+              {block && (
+                <span className="flex-shrink-0 text-[10px] text-gray-400">{block}</span>
+              )}
+              {blockDesc && (
+                <span className="text-[10px] text-gray-400 truncate min-w-0">{blockDesc}</span>
+              )}
+              {e.notes?.trim() && (
+                <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
+              )}
               <button
                 onClick={() => onDelete(e.id)}
-                className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100 text-sm leading-none"
+                className="flex-shrink-0 ml-auto text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none"
                 title="Remove"
               >
                 ×

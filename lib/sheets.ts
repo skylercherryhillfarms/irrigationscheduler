@@ -92,7 +92,7 @@ export async function fetchSets(forceRefresh = false): Promise<SheetRow[]> {
   }
 
   try {
-    const res = await fetch(SHEET_CSV_URL, { next: { revalidate: 3600 } });
+    const res = await fetch(SHEET_CSV_URL, forceRefresh ? { cache: 'no-store' } : { next: { revalidate: 3600 } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     const data = parseCSV(text);
