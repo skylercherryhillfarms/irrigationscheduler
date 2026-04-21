@@ -595,6 +595,7 @@ function ShiftSection({
           const block = setInfo?.block ?? '';
           const blockDesc = setInfo?.blockDescription ?? '';
           const fullTitle = [e.set_name, block, blockDesc, e.notes].filter(Boolean).join(' · ');
+          const isVenueEvent = e.set_name.toLowerCase().includes('venue event');
           return (
             <div
               key={e.id}
@@ -604,25 +605,27 @@ function ShiftSection({
                 ev.dataTransfer.setData('existingEntry', JSON.stringify(e));
                 ev.dataTransfer.effectAllowed = 'move';
               }}
-              className="flex items-center gap-1.5 bg-gray-50 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing"
+              className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing ${isVenueEvent ? 'border border-yellow-400/50' : 'bg-gray-50'}`}
+              style={isVenueEvent ? { background: 'radial-gradient(circle at 15% 50%, rgba(255,215,0,0.4) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(255,80,180,0.35) 0%, transparent 40%), radial-gradient(circle at 55% 85%, rgba(100,180,255,0.3) 0%, transparent 35%), #0d0a1e' } : undefined}
               title={fullTitle}
             >
+              {isVenueEvent && <span className="flex-shrink-0 text-xs">🎆</span>}
               <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
                 {e.location}
               </span>
-              <span className="text-xs font-medium text-gray-800 truncate min-w-0">{e.set_name}</span>
+              <span className={`text-xs font-medium truncate min-w-0 ${isVenueEvent ? 'text-yellow-100' : 'text-gray-800'}`}>{e.set_name}</span>
               {block && (
-                <span className="flex-shrink-0 text-[10px] text-gray-400">{block}</span>
+                <span className={`flex-shrink-0 text-[10px] ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{block}</span>
               )}
               {blockDesc && (
-                <span className="text-[10px] text-gray-400 truncate min-w-0">{blockDesc}</span>
+                <span className={`text-[10px] truncate min-w-0 ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{blockDesc}</span>
               )}
               {e.notes?.trim() && (
                 <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
               )}
               <button
                 onClick={() => onDelete(e.id)}
-                className="flex-shrink-0 ml-auto text-gray-300 hover:text-red-500 transition-colors text-sm leading-none md:opacity-0 md:group-hover:opacity-100"
+                className={`flex-shrink-0 ml-auto text-sm leading-none md:opacity-0 md:group-hover:opacity-100 transition-colors ${isVenueEvent ? 'text-yellow-300/50 hover:text-red-400' : 'text-gray-300 hover:text-red-500'}`}
                 title="Remove"
               >
                 ×
