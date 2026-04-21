@@ -672,26 +672,32 @@ function ShiftSection({
                 title={fullTitle}
               >
                 {isVenueEvent && <span className="flex-shrink-0 text-xs">🎆</span>}
-                <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
-                  {e.location}
-                </span>
-                <span className={`text-xs font-medium truncate min-w-0 ${isVenueEvent ? 'text-yellow-100' : 'text-gray-800'}`}>{e.set_name}</span>
-                {block && (
-                  <span className={`flex-shrink-0 text-[10px] ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{block}</span>
-                )}
-                {blockDesc && (
-                  <span className={`text-[10px] truncate min-w-0 ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{blockDesc}</span>
-                )}
-                {e.notes?.trim() && (
-                  <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
-                )}
-                <button
-                  onClick={() => onDelete(e.id)}
-                  className={`flex-shrink-0 ml-auto text-sm leading-none md:opacity-0 md:group-hover:opacity-100 transition-colors ${isVenueEvent ? 'text-yellow-300/50 hover:text-red-400' : 'text-gray-300 hover:text-red-500'}`}
-                  title="Remove"
-                >
-                  ×
-                </button>
+                {/* Left group: truncates at blockDesc level, set name always visible */}
+                <div className="flex items-center gap-1 min-w-0 flex-1">
+                  <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
+                    {e.location}
+                  </span>
+                  <span className={`flex-shrink-0 text-xs font-medium ${isVenueEvent ? 'text-yellow-100' : 'text-gray-800'}`}>{e.set_name}</span>
+                  {block && (
+                    <span className={`flex-shrink-0 text-[10px] ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{block}</span>
+                  )}
+                  {blockDesc && (
+                    <span className={`text-[10px] truncate ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{blockDesc}</span>
+                  )}
+                </div>
+                {/* Right group: always visible */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {e.notes?.trim() && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
+                  )}
+                  <button
+                    onClick={() => onDelete(e.id)}
+                    className={`text-sm leading-none md:opacity-0 md:group-hover:opacity-100 transition-colors ${isVenueEvent ? 'text-yellow-300/50 hover:text-red-400' : 'text-gray-300 hover:text-red-500'}`}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             </div>
           );
