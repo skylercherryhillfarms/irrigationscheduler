@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import NavBar from '@/components/NavBar';
 import { ScheduleEntry, SheetRow, getLocationColor, DAYS } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
 import { getWeekStart, getWeekDays, prevWeek, nextWeek, formatWeekRange } from '@/lib/dates';
 import { format } from 'date-fns';
 
@@ -12,7 +13,6 @@ export default function MasterSchedulePage() {
   const [sets, setSets] = useState<SheetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterLocation, setFilterLocation] = useState('');
-  const [filterDay, setFilterDay] = useState('');
   const [search, setSearch] = useState('');
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
@@ -21,7 +21,7 @@ export default function MasterSchedulePage() {
     fetch('/api/sets').then((r) => r.json()).then(setSets).catch(console.error);
   }, []);
 
-  useEffect(() => {
+  const loadSchedule = useCallback(() => {
     setLoading(true);
     fetch(`/api/schedule?weekStart=${weekStart}`)
       .then((r) => r.json())
@@ -29,203 +29,206 @@ export default function MasterSchedulePage() {
       .catch(() => setLoading(false));
   }, [weekStart]);
 
+  useEffect(() => { loadSchedule(); }, [loadSchedule]);
+
+  // Realtime: reflect changes made by other managers immediately
+  useEffect(() => {
+    const channel = supabase
+      .channel(`master-schedule-${weekStart}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule_entries' }, () => {
+        loadSchedule();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [weekStart, loadSchedule]);
+
+  // Lookup map: "location::setName" → SheetRow (for block/blockDescription)
+  const setsMap = useMemo(() => {
+    const map = new Map<string, SheetRow>();
+    for (const s of sets) map.set(`${s.location}::${s.setName}`, s);
+    return map;
+  }, [sets]);
+
   const locations = useMemo(() => [...new Set(entries.map((e) => e.location).filter(Boolean))].sort(), [entries]);
 
-  // Build a map: setName → dayOfWeek → entries
-  const scheduleMap = useMemo(() => {
-    const map = new Map<string, Map<number, ScheduleEntry[]>>();
-    for (const entry of entries) {
-      if (!map.has(entry.set_name)) map.set(entry.set_name, new Map());
-      const dayMap = map.get(entry.set_name)!;
-      if (!dayMap.has(entry.day_of_week)) dayMap.set(entry.day_of_week, []);
-      dayMap.get(entry.day_of_week)!.push(entry);
-    }
+  // Filter entries by location + search
+  const visibleEntries = useMemo(() => {
+    return entries.filter((e) => {
+      if (filterLocation && e.location !== filterLocation) return false;
+      if (search && !e.set_name.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [entries, filterLocation, search]);
+
+  // Build day → entries map from visible entries
+  const dayEntriesMap = useMemo(() => {
+    const map = new Map<number, ScheduleEntry[]>();
+    for (let i = 0; i < 7; i++) map.set(i, []);
+    for (const e of visibleEntries) map.get(e.day_of_week)?.push(e);
     return map;
-  }, [entries]);
+  }, [visibleEntries]);
 
-  // Unique scheduled sets, filtered
-  const scheduledSets = useMemo(() => {
-    const unique = new Map<string, ScheduleEntry>();
-    for (const entry of entries) {
-      if (!unique.has(entry.set_name)) unique.set(entry.set_name, entry);
-    }
-    let result = [...unique.values()];
-    if (filterLocation) result = result.filter((e) => e.location === filterLocation);
-    if (filterDay !== '') result = result.filter((e) =>
-      entries.some((en) => en.set_name === e.set_name && en.day_of_week === parseInt(filterDay))
-    );
-    if (search) result = result.filter((e) => e.set_name.toLowerCase().includes(search.toLowerCase()));
-    return result.sort((a, b) => a.location.localeCompare(b.location) || a.set_name.localeCompare(b.set_name));
-  }, [entries, filterLocation, filterDay, search]);
+  const getDayShiftEntries = (dayIndex: number, shift: 'AM' | 'PM') =>
+    (dayEntriesMap.get(dayIndex) ?? [])
+      .filter((e) => e.shift === shift || e.shift === 'Both')
+      .sort((a, b) => a.location.localeCompare(b.location));
 
-  // Stats
+  // Stats based on visible entries
   const stats = useMemo(() => {
-    const filtered = filterLocation ? entries.filter((e) => e.location === filterLocation) : entries;
-    const setsCount = new Set(filtered.map((e) => e.set_name)).size;
-    const amSlots = filtered.filter((e) => e.shift === 'AM' || e.shift === 'Both').length;
-    const pmSlots = filtered.filter((e) => e.shift === 'PM' || e.shift === 'Both').length;
-    const notes = filtered.filter((e) => e.notes?.trim()).length;
+    const setsCount = new Set(visibleEntries.map((e) => `${e.location}::${e.set_name}`)).size;
+    const amSlots = visibleEntries.filter((e) => e.shift === 'AM' || e.shift === 'Both').length;
+    const pmSlots = visibleEntries.filter((e) => e.shift === 'PM' || e.shift === 'Both').length;
+    const notes = visibleEntries.filter((e) => e.notes?.trim()).length;
     return { setsCount, amSlots, pmSlots, notes };
-  }, [entries, filterLocation]);
+  }, [visibleEntries]);
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#f8faf4' }}>
-      <NavBar />
+    <>
+    <style>{`
+      @media print {
+        @page { size: landscape; margin: 0.4in; }
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        .no-print { display: none !important; }
+        html, body { height: auto !important; overflow: visible !important; }
+        .print-root { height: auto !important; overflow: visible !important; }
+        .print-scroll { height: auto !important; overflow: visible !important; flex: none !important; }
+        .print-sticky { position: static !important; }
+      }
+    `}</style>
+    <div className="h-screen overflow-hidden flex flex-col print-root" style={{ backgroundColor: '#f8faf4' }}>
+      <div className="no-print"><NavBar /></div>
 
-      {/* Header */}
-      <div style={{ backgroundColor: '#27500A' }} className="text-white px-4 py-4">
-        <div className="max-w-screen-2xl mx-auto">
-          <h1 className="text-2xl font-bold mb-3">Master Schedule</h1>
-
-          {/* Week navigation */}
-          <div className="flex flex-wrap items-center gap-3">
+      {/* Screen-only header */}
+      <div style={{ backgroundColor: '#27500A' }} className="no-print text-white px-4 py-4">
+        <div className="max-w-screen-2xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Master Schedule</h1>
+            <p className="text-green-200 text-sm">Read-only view of all scheduled sets</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setWeekStart(prevWeek(weekStart))} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">‹</button>
+            <span className="font-semibold">{formatWeekRange(weekStart)}</span>
+            <button onClick={() => setWeekStart(nextWeek(weekStart))} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">›</button>
+            <button onClick={() => setWeekStart(getWeekStart())} disabled={weekStart === getWeekStart()} className="px-3 py-1.5 text-xs rounded-md bg-white/20 hover:bg-white/30 transition-colors disabled:opacity-40 disabled:cursor-default">Today</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search sets…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="border border-white/30 rounded-lg px-3 py-1.5 text-sm bg-white/10 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/50 w-full sm:w-40"
+            />
+            <select
+              value={filterLocation}
+              onChange={(e) => setFilterLocation(e.target.value)}
+              className="border border-white/30 rounded-lg px-2 py-1.5 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+            >
+              <option value="" className="text-gray-800">All Locations</option>
+              {locations.map((l) => <option key={l} value={l} className="text-gray-800">{l}</option>)}
+            </select>
+            {(filterLocation || search) && (
+              <button onClick={() => { setFilterLocation(''); setSearch(''); }} className="text-xs text-white/70 hover:text-white underline">
+                Clear
+              </button>
+            )}
             <button
-              onClick={() => setWeekStart(prevWeek(weekStart))}
-              className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
-            >‹</button>
-            <span className="font-semibold text-lg">{formatWeekRange(weekStart)}</span>
-            <button
-              onClick={() => setWeekStart(nextWeek(weekStart))}
-              className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
-            >›</button>
-            <button
-              onClick={() => setWeekStart(getWeekStart())}
-              className="px-3 py-1.5 text-xs rounded-md bg-white/20 hover:bg-white/30 transition-colors"
-            >Today</button>
+              onClick={() => window.print()}
+              className="px-3 py-1.5 text-sm rounded-lg bg-white/20 hover:bg-white/30 transition-colors font-medium"
+            >
+              🖨 Print
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Stats Bar */}
-      <div style={{ backgroundColor: '#EAF3DE' }} className="border-b border-green-200 px-4 py-3">
-        <div className="max-w-screen-2xl mx-auto flex flex-wrap gap-4 text-sm">
-          <Stat label="Sets Scheduled" value={stats.setsCount} color="text-green-800" />
-          <Stat label="AM Slots" value={stats.amSlots} color="text-sky-700" />
-          <Stat label="PM Slots" value={stats.pmSlots} color="text-orange-600" />
-          <Stat label="Treatment Notes" value={stats.notes} color="text-purple-700" />
-        </div>
+      {/* Print-only title */}
+      <div className="hidden print:block px-2 pt-2 pb-1">
+        <div className="text-lg font-bold">Cherry Hill Farms — Master Schedule</div>
+        <div className="text-sm text-gray-600">{formatWeekRange(weekStart)}{filterLocation ? ` · ${filterLocation}` : ''}</div>
       </div>
 
-      {/* Filters */}
-      <div className="max-w-screen-2xl mx-auto w-full px-4 py-3 flex flex-wrap gap-3 items-center">
-        <input
-          type="text"
-          placeholder="Search sets…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600 w-48"
-        />
-        <select
-          value={filterLocation}
-          onChange={(e) => setFilterLocation(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
-        >
-          <option value="">All Locations</option>
-          {locations.map((l) => (
-            <option key={l} value={l}>{l}</option>
-          ))}
-        </select>
-        <select
-          value={filterDay}
-          onChange={(e) => setFilterDay(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
-        >
-          <option value="">All Days</option>
-          {DAYS.map((d, i) => (
-            <option key={d} value={i}>{d}</option>
-          ))}
-        </select>
-        {(filterLocation || filterDay || search) && (
-          <button
-            onClick={() => { setFilterLocation(''); setFilterDay(''); setSearch(''); }}
-            className="text-sm text-red-600 hover:underline"
-          >Clear filters</button>
-        )}
-      </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-x-auto px-4 pb-8">
-        <div className="max-w-screen-2xl mx-auto">
-          {loading ? (
-            <div className="text-center py-16 text-gray-400">Loading schedule…</div>
-          ) : scheduledSets.length === 0 ? (
-            <div className="text-center py-16 text-gray-400">
-              <div className="text-4xl mb-3">📅</div>
-              <div className="font-medium">No sets scheduled this week</div>
-              <div className="text-sm mt-1">Use the Manager Portal to add schedules</div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr style={{ backgroundColor: '#27500A' }} className="text-white">
-                    <th className="text-left px-4 py-3 font-semibold sticky left-0 z-10" style={{ backgroundColor: '#27500A', minWidth: 200 }}>
-                      Set / Location
-                    </th>
-                    {weekDays.map((d, i) => (
-                      <th key={i} className="text-center px-3 py-3 font-semibold" style={{ minWidth: 110 }}>
-                        <div>{DAYS[i]}</div>
-                        <div className="text-green-200 text-xs font-normal">{format(d, 'MMM d')}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {scheduledSets.map((set, idx) => {
-                    const colors = getLocationColor(set.location);
-                    const dayMap = scheduleMap.get(set.set_name);
-                    return (
-                      <tr
-                        key={set.set_name}
-                        className={`border-t border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-green-50 transition-colors`}
-                      >
-                        <td className="px-4 py-2.5 sticky left-0 z-10 bg-inherit">
-                          <div className="font-medium text-gray-800 text-sm">{set.set_name}</div>
-                          <span className={`inline-block mt-0.5 text-xs px-2 py-0.5 rounded-full font-medium border ${colors.bg} ${colors.text} ${colors.border}`}>
-                            {set.location}
-                          </span>
-                          {set.grouping && (
-                            <span className="ml-1 text-xs text-gray-400">{set.grouping}</span>
-                          )}
-                        </td>
-                        {Array.from({ length: 7 }, (_, dayIdx) => {
-                          const dayEntries = dayMap?.get(dayIdx) ?? [];
-                          return (
-                            <td key={dayIdx} className="px-2 py-2.5 text-center align-middle">
-                              {dayEntries.length > 0 ? (
-                                <div className="flex flex-col items-center gap-1">
-                                  {dayEntries.map((entry) => (
-                                    <div key={entry.id} className="flex flex-col items-center gap-0.5">
-                                      <div className="flex gap-1 flex-wrap justify-center">
-                                        {(entry.shift === 'AM' || entry.shift === 'Both') && (
-                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 border border-sky-300">AM</span>
-                                        )}
-                                        {(entry.shift === 'PM' || entry.shift === 'Both') && (
-                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">PM</span>
-                                        )}
-                                      </div>
-                                      {entry.notes?.trim() && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200 max-w-[90px] truncate" title={entry.notes}>
-                                          {entry.notes}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-gray-200">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {/* Calendar */}
+      <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0 print-scroll">
+        <div className="min-w-[900px] flex gap-1 p-2 items-start print:min-w-0 print:p-0 print:gap-0.5">
+          {Array.from({ length: 7 }, (_, dayIndex) => {
+            const dayDate = weekDays[dayIndex];
+            const amEntries = getDayShiftEntries(dayIndex, 'AM');
+            const pmEntries = getDayShiftEntries(dayIndex, 'PM');
+
+            return (
+              <div key={dayIndex} className="flex-1 min-w-[120px] flex flex-col bg-white rounded-xl border border-gray-200">
+                {/* Day header */}
+                <div style={{ backgroundColor: '#27500A' }} className="text-white text-center py-2 px-1 rounded-t-xl sticky top-0 z-10 print-sticky">
+                  <div className="font-bold text-sm">{DAYS[dayIndex]}</div>
+                  <div className="text-green-200 text-xs">{format(dayDate, 'MMM d')}</div>
+                </div>
+
+                {loading ? (
+                  <div className="flex-1 flex items-center justify-center text-gray-300 text-xs">…</div>
+                ) : (
+                  <div className="flex flex-col p-1 gap-1">
+                    <ShiftSection label="AM" entries={amEntries} setsMap={setsMap} />
+                    <ShiftSection label="PM" entries={pmEntries} setsMap={setsMap} />
+                    {amEntries.length === 0 && pmEntries.length === 0 && (
+                      <div className="flex-1 flex items-center justify-center text-gray-300 text-xs py-4">—</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+      </div>
+    </div>
+    </>
+  );
+}
+
+function ShiftSection({
+  label,
+  entries,
+  setsMap,
+}: {
+  label: 'AM' | 'PM';
+  entries: ScheduleEntry[];
+  setsMap: Map<string, SheetRow>;
+}) {
+  const labelStyle = label === 'AM'
+    ? 'bg-sky-100 text-sky-700 border-sky-200'
+    : 'bg-orange-100 text-orange-700 border-orange-200';
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-100 overflow-hidden">
+      <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
+      <div className="space-y-px p-1">
+        {entries.map((e) => {
+          const colors = getLocationColor(e.location);
+          const setInfo = setsMap.get(`${e.location}::${e.set_name}`);
+          const block = setInfo?.block ?? '';
+          const blockDesc = setInfo?.blockDescription ?? '';
+          const fullTitle = [e.set_name, block, blockDesc, e.notes].filter(Boolean).join(' · ');
+          return (
+            <div key={e.id} className="bg-gray-50 rounded px-1.5 py-0.5 flex items-center gap-1.5 overflow-hidden" title={fullTitle}>
+              <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
+                {e.location}
+              </span>
+              <span className="flex-shrink-0 text-xs font-medium text-gray-800">{e.set_name}</span>
+              {block && (
+                <span className="flex-shrink-0 text-[10px] text-gray-400">{block}</span>
+              )}
+              {blockDesc && (
+                <span className="text-[10px] text-gray-400 truncate min-w-0">{blockDesc}</span>
+              )}
+              {e.notes?.trim() && (
+                <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-purple-400" />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

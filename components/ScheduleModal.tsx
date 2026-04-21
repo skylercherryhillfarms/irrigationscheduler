@@ -10,12 +10,13 @@ interface Props {
   sets: SheetRow[];
   dayIndex: number;
   weekStart: string;
+  defaultShift?: 'AM' | 'PM' | 'Both';
   onConfirm: (dayIndex: number, shift: 'AM' | 'PM' | 'Both', notes: string) => void;
   onClose: () => void;
 }
 
-export default function ScheduleModal({ sets, dayIndex, weekStart, onConfirm, onClose }: Props) {
-  const [shift, setShift] = useState<'AM' | 'PM' | 'Both'>('AM');
+export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift, onConfirm, onClose }: Props) {
+  const [shift, setShift] = useState<'AM' | 'PM' | 'Both'>(defaultShift ?? 'AM');
   const [notes, setNotes] = useState('');
 
   const handlePreset = (p: string) => {
@@ -27,7 +28,7 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, onConfirm, on
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={{ backgroundColor: '#27500A' }} className="text-white px-5 py-4 rounded-t-2xl">
           <div className="flex items-center justify-between">
@@ -39,7 +40,7 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, onConfirm, on
           </div>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto">
           {/* Sets preview */}
           <div className="max-h-32 overflow-y-auto space-y-1">
             {sets.map((s) => (
@@ -83,7 +84,7 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, onConfirm, on
                 <button
                   key={p}
                   onClick={() => handlePreset(p)}
-                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                  className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
                     notes.includes(p)
                       ? 'bg-purple-100 text-purple-800 border-purple-400'
                       : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-gray-300'
@@ -98,7 +99,7 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, onConfirm, on
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Custom note…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-green-600"
             />
           </div>
 

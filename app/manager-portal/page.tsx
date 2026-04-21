@@ -30,6 +30,10 @@ export default function ManagerPortalPage() {
   const [copyLoading, setCopyLoading] = useState(false);
   const [copyMsg, setCopyMsg] = useState('');
   const [copyLocation, setCopyLocation] = useState('');
+  const [copyTargetWeek, setCopyTargetWeek] = useState('');
+
+  // Sidebar open state (collapsed by default on mobile)
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Modal state
   const [modal, setModal] = useState<{ dayIndex: number; defaultShift?: 'AM' | 'PM' | 'Both' } | null>(null);
@@ -213,14 +217,15 @@ export default function ManagerPortalPage() {
   };
 
   const handleCopyWeek = async () => {
-    if (!copyLocation) { setCopyMsg('Select a location to copy'); return; }
+    if (!copyLocation) { setCopyMsg('Select a location'); return; }
+    if (!copyTargetWeek) { setCopyMsg('Select a target week'); return; }
     setCopyLoading(true);
     setCopyMsg('');
     try {
       const res = await fetch('/api/schedule/copy-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weekStart, location: copyLocation }),
+        body: JSON.stringify({ weekStart, targetWeek: copyTargetWeek, location: copyLocation }),
       });
       const data = await res.json();
       if (data.error) {
@@ -268,9 +273,18 @@ export default function ManagerPortalPage() {
       {/* Page header */}
       <div style={{ backgroundColor: '#27500A' }} className="text-white px-4 py-4">
         <div className="max-w-screen-2xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold">Manager Portal</h1>
-            <p className="text-green-200 text-sm">Drag sets from sidebar onto day columns to schedule</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen((o) => !o)}
+              className="md:hidden p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors text-lg leading-none"
+              aria-label="Toggle sets sidebar"
+            >
+              ☰
+            </button>
+            <div>
+              <h1 className="text-2xl font-bold">Manager Portal</h1>
+              <p className="text-green-200 text-sm hidden sm:block">Drag sets from sidebar onto day columns to schedule</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => setWeekStart(prevWeek(weekStart))} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">‹</button>
@@ -278,36 +292,59 @@ export default function ManagerPortalPage() {
             <button onClick={() => setWeekStart(nextWeek(weekStart))} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors">›</button>
             <button onClick={() => setWeekStart(getWeekStart())} disabled={weekStart === getWeekStart()} className="px-3 py-1.5 text-xs rounded-md bg-white/20 hover:bg-white/30 transition-colors disabled:opacity-40 disabled:cursor-default">Today</button>
           </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={copyLocation}
-              onChange={(e) => setCopyLocation(e.target.value)}
-              className="border border-white/30 rounded-lg px-2 py-2 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
-            >
-              <option value="" className="text-gray-800">Select location…</option>
-              {locations.map((l) => <option key={l} value={l} className="text-gray-800">{l}</option>)}
-            </select>
-            <button
-              onClick={handleCopyWeek}
-              disabled={copyLoading || !copyLocation}
-              className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              {copyLoading ? 'Copying…' : '📋 Copy to Next Week'}
-            </button>
-            {copyMsg && (
-              <span className={`text-xs ${copyMsg.startsWith('Error') ? 'text-red-300' : 'text-green-200'}`}>
-                {copyMsg}
-              </span>
-            )}
+          <div className="border border-white/30 rounded-xl px-3 pt-1 pb-2">
+            <p className="text-green-200 text-xs font-semibold mb-1.5 uppercase tracking-wide">Copy Schedule</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={copyLocation}
+                onChange={(e) => setCopyLocation(e.target.value)}
+                className="border border-white/30 rounded-lg px-2 py-2 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+              >
+                <option value="" className="text-gray-800">Select location…</option>
+                {locations.map((l) => <option key={l} value={l} className="text-gray-800">{l}</option>)}
+              </select>
+              <input
+                type="date"
+                value={copyTargetWeek}
+                onChange={(e) => setCopyTargetWeek(e.target.value ? getWeekStart(new Date(e.target.value + 'T00:00:00')) : '')}
+                className="border border-white/30 rounded-lg px-2 py-2 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50 [color-scheme:dark]"
+                title="Pick any day in the target week"
+              />
+              <button
+                onClick={handleCopyWeek}
+                disabled={copyLoading || !copyLocation || !copyTargetWeek}
+                className="px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-default"
+              >
+                {copyLoading ? 'Copying…' : '📋 Copy to Week'}
+              </button>
+              {copyMsg && (
+                <span className={`text-xs ${copyMsg.startsWith('Error') ? 'text-red-300' : 'text-green-200'}`}>
+                  {copyMsg}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main content: sidebar + calendar */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div className="flex-1 flex overflow-hidden min-h-0 relative">
+
+        {/* Mobile overlay */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-20 bg-black/40 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
         {/* SIDEBAR */}
-        <aside className="w-72 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+        <aside className={`
+          flex-shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-hidden w-72
+          absolute inset-y-0 left-0 z-30 transform transition-transform duration-200 ease-in-out
+          md:relative md:translate-x-0
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}>
           <div className="p-3 border-b border-gray-100 space-y-2">
             <input
               type="text"
@@ -335,11 +372,11 @@ export default function ManagerPortalPage() {
               </select>
             </div>
             <div className="flex gap-2 text-xs">
-              <button onClick={selectAll} className="text-green-700 hover:underline">Select all</button>
-              <span className="text-gray-300">|</span>
-              <button onClick={() => { clearAll(); setFilterLocation(''); setFilterGroup(''); setSearch(''); }} className="text-gray-500 hover:underline">Clear all</button>
-              <span className="text-gray-300">|</span>
-              <button onClick={() => loadSets(true)} disabled={setsLoading} className="text-blue-600 hover:underline disabled:opacity-50" title="Re-fetch sets from Google Sheet">
+              <button onClick={selectAll} className="text-green-700 hover:underline min-h-[36px] flex items-center">Select all</button>
+              <span className="text-gray-300 flex items-center">|</span>
+              <button onClick={() => { clearAll(); setFilterLocation(''); setFilterGroup(''); setSearch(''); }} className="text-gray-500 hover:underline min-h-[36px] flex items-center">Clear all</button>
+              <span className="text-gray-300 flex items-center">|</span>
+              <button onClick={() => loadSets(true)} disabled={setsLoading} className="text-blue-600 hover:underline disabled:opacity-50 min-h-[36px] flex items-center" title="Re-fetch sets from Google Sheet">
                 {setsLoading ? 'Loading…' : '↻ Refresh'}
               </button>
               {selected.size > 0 && (
@@ -567,7 +604,7 @@ function ShiftSection({
               )}
               <button
                 onClick={() => onDelete(e.id)}
-                className="flex-shrink-0 ml-auto text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 text-sm leading-none"
+                className="flex-shrink-0 ml-auto text-gray-300 hover:text-red-500 transition-colors text-sm leading-none md:opacity-0 md:group-hover:opacity-100"
                 title="Remove"
               >
                 ×
