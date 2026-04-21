@@ -44,6 +44,7 @@ export default function ManagerPortalPage() {
   const [dragOverShift, setDragOverShift] = useState<{ dayIndex: number; shift: 'AM' | 'PM' } | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const dragStartedRef = useRef(false);
+  const draggingEntryRef = useRef<ScheduleEntry | null>(null);
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
@@ -188,10 +189,19 @@ export default function ManagerPortalPage() {
     await fetch(`/api/schedule?id=${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ day_of_week: dayIndex, shift }),
+      body: JSON.stringify({ day_of_week: dayIndex, shift, position: null }),
     });
     loadSchedule();
   };
+
+  const handleReorder = useCallback(async (orderedIds: string[]) => {
+    await fetch('/api/schedule', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(orderedIds.map((id, position) => ({ id, position }))),
+    });
+    loadSchedule();
+  }, [loadSchedule]);
 
   const handleDropOnShift = (e: React.DragEvent, dayIndex: number, shift: 'AM' | 'PM') => {
     e.preventDefault();
@@ -512,6 +522,8 @@ export default function ManagerPortalPage() {
                           label="AM"
                           entries={amEntries}
                           onDelete={handleDeleteEntry}
+                          onReorder={handleReorder}
+                          draggingEntryRef={draggingEntryRef}
                           gpmTotal={genolaGPM_AM > 0 ? genolaGPM_AM : null}
                           acresTotal={charliesAcres_AM > 0 ? charliesAcres_AM : null}
                           setsMap={setsMap}
@@ -528,6 +540,8 @@ export default function ManagerPortalPage() {
                           label="PM"
                           entries={pmEntries}
                           onDelete={handleDeleteEntry}
+                          onReorder={handleReorder}
+                          draggingEntryRef={draggingEntryRef}
                           gpmTotal={genolaGPM_PM > 0 ? genolaGPM_PM : null}
                           acresTotal={charliesAcres_PM > 0 ? charliesAcres_PM : null}
                           setsMap={setsMap}
@@ -567,6 +581,8 @@ function ShiftSection({
   label,
   entries,
   onDelete,
+  onReorder,
+  draggingEntryRef,
   gpmTotal,
   acresTotal,
   setsMap,
@@ -574,10 +590,14 @@ function ShiftSection({
   label: 'AM' | 'PM';
   entries: ScheduleEntry[];
   onDelete: (id: string) => void;
+  onReorder: (orderedIds: string[]) => void;
+  draggingEntryRef: { current: ScheduleEntry | null };
   gpmTotal: number | null;
   acresTotal: number | null;
   setsMap: Map<string, SheetRow>;
 }) {
+  const [insertBeforeId, setInsertBeforeId] = useState<string | 'end' | null>(null);
+
   const labelStyle =
     label === 'AM'
       ? 'bg-sky-100 text-sky-700 border-sky-200'
@@ -585,10 +605,30 @@ function ShiftSection({
 
   if (entries.length === 0) return null;
 
+  const isDraggingInThisSection = () =>
+    draggingEntryRef.current !== null &&
+    entries.some((e) => e.id === draggingEntryRef.current!.id);
+
+  const getNewOrder = (targetId: string | 'end') => {
+    const dragged = draggingEntryRef.current!;
+    const ids = entries.map((e) => e.id);
+    if (targetId === dragged.id) return ids;
+    const without = ids.filter((id) => id !== dragged.id);
+    if (targetId === 'end') return [...without, dragged.id];
+    const idx = without.indexOf(targetId);
+    if (idx === -1) return ids;
+    return [...without.slice(0, idx), dragged.id, ...without.slice(idx)];
+  };
+
   return (
-    <div className="rounded-lg border border-gray-100 overflow-hidden">
+    <div
+      className="rounded-lg border border-gray-100 overflow-hidden"
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setInsertBeforeId(null);
+      }}
+    >
       <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
-      <div className="space-y-px p-1">
+      <div className="p-1 space-y-px">
         {entries.map((e) => {
           const colors = getLocationColor(e.location);
           const setInfo = setsMap.get(`${e.location}::${e.set_name}`);
@@ -597,42 +637,86 @@ function ShiftSection({
           const fullTitle = [e.set_name, block, blockDesc, e.notes].filter(Boolean).join(' · ');
           const isVenueEvent = e.set_name.toLowerCase().includes('venue event');
           return (
-            <div
-              key={e.id}
-              draggable
-              onDragStart={(ev) => {
-                ev.stopPropagation();
-                ev.dataTransfer.setData('existingEntry', JSON.stringify(e));
-                ev.dataTransfer.effectAllowed = 'move';
-              }}
-              className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing ${isVenueEvent ? 'border border-yellow-400/50' : 'bg-gray-50'}`}
-              style={isVenueEvent ? { background: 'radial-gradient(circle at 15% 50%, rgba(255,215,0,0.4) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(255,80,180,0.35) 0%, transparent 40%), radial-gradient(circle at 55% 85%, rgba(100,180,255,0.3) 0%, transparent 35%), #0d0a1e' } : undefined}
-              title={fullTitle}
-            >
-              {isVenueEvent && <span className="flex-shrink-0 text-xs">🎆</span>}
-              <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
-                {e.location}
-              </span>
-              <span className={`text-xs font-medium truncate min-w-0 ${isVenueEvent ? 'text-yellow-100' : 'text-gray-800'}`}>{e.set_name}</span>
-              {block && (
-                <span className={`flex-shrink-0 text-[10px] ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{block}</span>
+            <div key={e.id} className="relative">
+              {insertBeforeId === e.id && (
+                <div className="absolute -top-px inset-x-0 h-0.5 bg-blue-400 rounded z-10 pointer-events-none" />
               )}
-              {blockDesc && (
-                <span className={`text-[10px] truncate min-w-0 ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{blockDesc}</span>
-              )}
-              {e.notes?.trim() && (
-                <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
-              )}
-              <button
-                onClick={() => onDelete(e.id)}
-                className={`flex-shrink-0 ml-auto text-sm leading-none md:opacity-0 md:group-hover:opacity-100 transition-colors ${isVenueEvent ? 'text-yellow-300/50 hover:text-red-400' : 'text-gray-300 hover:text-red-500'}`}
-                title="Remove"
+              <div
+                draggable
+                onDragStart={(ev) => {
+                  ev.stopPropagation();
+                  ev.dataTransfer.setData('existingEntry', JSON.stringify(e));
+                  ev.dataTransfer.effectAllowed = 'move';
+                  draggingEntryRef.current = e;
+                }}
+                onDragEnd={() => {
+                  draggingEntryRef.current = null;
+                  setInsertBeforeId(null);
+                }}
+                onDragOver={(ev) => {
+                  if (!isDraggingInThisSection()) return;
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  const newId = e.id === draggingEntryRef.current?.id ? null : e.id;
+                  if (insertBeforeId !== newId) setInsertBeforeId(newId);
+                }}
+                onDrop={(ev) => {
+                  if (!isDraggingInThisSection()) return;
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setInsertBeforeId(null);
+                  onReorder(getNewOrder(e.id));
+                }}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing ${isVenueEvent ? 'border border-yellow-400/50' : 'bg-gray-50'}`}
+                style={isVenueEvent ? { background: 'radial-gradient(circle at 15% 50%, rgba(255,215,0,0.4) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(255,80,180,0.35) 0%, transparent 40%), radial-gradient(circle at 55% 85%, rgba(100,180,255,0.3) 0%, transparent 35%), #0d0a1e' } : undefined}
+                title={fullTitle}
               >
-                ×
-              </button>
+                {isVenueEvent && <span className="flex-shrink-0 text-xs">🎆</span>}
+                <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
+                  {e.location}
+                </span>
+                <span className={`text-xs font-medium truncate min-w-0 ${isVenueEvent ? 'text-yellow-100' : 'text-gray-800'}`}>{e.set_name}</span>
+                {block && (
+                  <span className={`flex-shrink-0 text-[10px] ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{block}</span>
+                )}
+                {blockDesc && (
+                  <span className={`text-[10px] truncate min-w-0 ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{blockDesc}</span>
+                )}
+                {e.notes?.trim() && (
+                  <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
+                )}
+                <button
+                  onClick={() => onDelete(e.id)}
+                  className={`flex-shrink-0 ml-auto text-sm leading-none md:opacity-0 md:group-hover:opacity-100 transition-colors ${isVenueEvent ? 'text-yellow-300/50 hover:text-red-400' : 'text-gray-300 hover:text-red-500'}`}
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </div>
             </div>
           );
         })}
+        {/* End drop zone — lets user drag to the bottom of the list */}
+        <div
+          className="relative h-2"
+          onDragOver={(ev) => {
+            if (!isDraggingInThisSection()) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (insertBeforeId !== 'end') setInsertBeforeId('end');
+          }}
+          onDrop={(ev) => {
+            if (!isDraggingInThisSection()) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            setInsertBeforeId(null);
+            onReorder(getNewOrder('end'));
+          }}
+        >
+          {insertBeforeId === 'end' && (
+            <div className="absolute top-0.5 inset-x-0 h-0.5 bg-blue-400 rounded pointer-events-none" />
+          )}
+        </div>
       </div>
       {/* Totals */}
       {(gpmTotal !== null || acresTotal !== null) && (
