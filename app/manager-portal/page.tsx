@@ -43,6 +43,7 @@ export default function ManagerPortalPage() {
   const [dragOverDay, setDragOverDay] = useState<number | null>(null);
   const [dragOverShift, setDragOverShift] = useState<{ dayIndex: number; shift: 'AM' | 'PM' } | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const dragStartedRef = useRef(false);
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
@@ -399,8 +400,9 @@ export default function ManagerPortalPage() {
                   <div
                     key={key}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, key)}
-                    onClick={() => toggleSelect(key)}
+                    onDragStart={(e) => { dragStartedRef.current = true; handleDragStart(e, key); }}
+                    onDragEnd={() => { setTimeout(() => { dragStartedRef.current = false; }, 100); }}
+                    onClick={() => { if (!dragStartedRef.current) toggleSelect(key); }}
                     className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-grab active:cursor-grabbing transition-colors select-none ${
                       isSelected
                         ? 'bg-green-50 border border-green-300'
@@ -592,7 +594,7 @@ function ShiftSection({
               <span className={`flex-shrink-0 text-[10px] px-1 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
                 {e.location}
               </span>
-              <span className="flex-shrink-0 text-xs font-medium text-gray-800">{e.set_name}</span>
+              <span className="text-xs font-medium text-gray-800 truncate min-w-0">{e.set_name}</span>
               {block && (
                 <span className="flex-shrink-0 text-[10px] text-gray-400">{block}</span>
               )}
