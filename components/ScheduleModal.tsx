@@ -8,7 +8,7 @@ const NOTE_PRESETS = ['Fertilize', 'Iron', 'Pesticide', 'Check valves', 'Flush l
 
 interface Props {
   sets: SheetRow[];
-  dayIndex: number;
+  dayIndex?: number;
   weekStart: string;
   defaultShift?: 'AM' | 'PM' | 'Both';
   onConfirm: (dayIndex: number, shift: 'AM' | 'PM' | 'Both', notes: string) => void;
@@ -18,6 +18,9 @@ interface Props {
 export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift, onConfirm, onClose }: Props) {
   const [shift, setShift] = useState<'AM' | 'PM' | 'Both'>(defaultShift ?? 'AM');
   const [notes, setNotes] = useState('');
+  const [selectedDay, setSelectedDay] = useState<number | null>(dayIndex ?? null);
+
+  const needsDayPicker = dayIndex === undefined;
 
   const handlePreset = (p: string) => {
     setNotes((prev) => {
@@ -30,11 +33,13 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift,
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div style={{ backgroundColor: '#27500A' }} className="text-white px-5 py-4 rounded-t-2xl">
+        <div style={{ backgroundColor: '#27500A' }} className="text-white px-5 py-4 rounded-t-2xl flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
               <div className="font-bold text-lg">Schedule Sets</div>
-              <div className="text-green-200 text-sm">{DAYS[dayIndex]} • {sets.length} set{sets.length !== 1 ? 's' : ''}</div>
+              <div className="text-green-200 text-sm">
+                {selectedDay !== null ? DAYS[selectedDay] : 'Pick a day'} • {sets.length} set{sets.length !== 1 ? 's' : ''}
+              </div>
             </div>
             <button onClick={onClose} className="text-green-200 hover:text-white text-2xl leading-none">×</button>
           </div>
@@ -51,6 +56,28 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift,
               </div>
             ))}
           </div>
+
+          {/* Day picker — only shown when opened from mobile button */}
+          {needsDayPicker && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Day</label>
+              <div className="grid grid-cols-7 gap-1">
+                {DAYS.map((day, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedDay(i)}
+                    className={`py-2 rounded-lg text-xs font-semibold transition-colors border-2 ${
+                      selectedDay === i
+                        ? 'border-green-600 bg-green-50 text-green-800'
+                        : 'border-gray-200 bg-gray-50 text-gray-600'
+                    }`}
+                  >
+                    {day.slice(0, 3)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Shift selector */}
           <div>
@@ -112,9 +139,10 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift,
               Cancel
             </button>
             <button
-              onClick={() => onConfirm(dayIndex, shift, notes)}
+              onClick={() => { if (selectedDay !== null) onConfirm(selectedDay, shift, notes); }}
+              disabled={selectedDay === null}
               style={{ backgroundColor: '#27500A' }}
-              className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+              className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-default"
             >
               Schedule
             </button>

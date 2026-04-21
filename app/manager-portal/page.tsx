@@ -36,7 +36,7 @@ export default function ManagerPortalPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Modal state
-  const [modal, setModal] = useState<{ dayIndex: number; defaultShift?: 'AM' | 'PM' | 'Both' } | null>(null);
+  const [modal, setModal] = useState<{ dayIndex?: number; defaultShift?: 'AM' | 'PM' | 'Both' } | null>(null);
 
   // Drag state
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -445,6 +445,22 @@ export default function ManagerPortalPage() {
               })
             )}
           </div>
+
+          {/* Mobile-only: schedule selected sets button */}
+          {selected.size > 0 && (
+            <div className="md:hidden p-3 border-t border-gray-100 flex-shrink-0">
+              <button
+                onClick={() => {
+                  dragRef.current = { sets: allSets.filter((s) => selected.has(setKey(s))), startX: 0, startY: 0, currentX: 0, currentY: 0, active: false };
+                  setModal({});
+                }}
+                style={{ backgroundColor: '#27500A' }}
+                className="w-full py-3 rounded-xl text-white text-sm font-semibold"
+              >
+                Schedule {selected.size} selected set{selected.size !== 1 ? 's' : ''} →
+              </button>
+            </div>
+          )}
         </aside>
 
         {/* CALENDAR */}
