@@ -277,12 +277,8 @@ export default function ManagerPortalPage() {
     return map;
   }, [entries, filterLocation]);
 
-  // Totals per day per shift — sorted by location
-  const getDayShiftEntries = (dayIndex: number, shift: 'AM' | 'PM') => {
-    return (dayEntriesMap.get(dayIndex) ?? [])
-      .filter((e) => e.shift === shift || e.shift === 'Both')
-      .sort((a, b) => a.location.localeCompare(b.location));
-  };
+  const getDayShiftEntries = (dayIndex: number, shift: 'AM' | 'PM') =>
+    (dayEntriesMap.get(dayIndex) ?? []).filter((e) => e.shift === shift || e.shift === 'Both');
 
   return (
     <div className="h-screen overflow-hidden flex flex-col" style={{ backgroundColor: '#f8faf4' }}>

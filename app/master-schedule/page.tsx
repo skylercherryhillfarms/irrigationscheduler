@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import NavBar from '@/components/NavBar';
-import { ScheduleEntry, SheetRow, getLocationColor, DAYS } from '@/lib/types';
+import { ScheduleEntry, SheetRow, getLocationColor, getGroupingColor, DAYS } from '@/lib/types';
 import { supabase } from '@/lib/supabase';
 import { getWeekStart, getWeekDays, prevWeek, nextWeek, formatWeekRange } from '@/lib/dates';
 import { format } from 'date-fns';
@@ -224,6 +224,12 @@ function ShiftSection({
                 {e.location}
               </span>
               <span className={`flex-shrink-0 text-xs font-medium ${isVenueEvent ? 'text-yellow-100' : 'text-gray-800'}`}>{e.set_name}</span>
+              {e.grouping && e.location !== 'Genola' && (() => {
+                const gc = getGroupingColor(e.grouping);
+                return gc
+                  ? <span className={`flex-shrink-0 text-[10px] px-1.5 py-0 rounded-full border leading-tight ${gc.bg} ${gc.text} ${gc.border}`}>{e.grouping}</span>
+                  : <span className="flex-shrink-0 text-[10px] text-gray-400">{e.grouping}</span>;
+              })()}
               {block && (
                 <span className={`flex-shrink-0 text-[10px] ${isVenueEvent ? 'text-yellow-300/70' : 'text-gray-400'}`}>{block}</span>
               )}
