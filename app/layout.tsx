@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Santaquin Farms – Irrigation Scheduler',
-  description: 'Farm irrigation scheduling for Santaquin Farms',
+  title: 'Cherry Hill Farms – Utah Irrigation Scheduler',
+  description: 'Farm irrigation scheduling for Cherry Hill Farms',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

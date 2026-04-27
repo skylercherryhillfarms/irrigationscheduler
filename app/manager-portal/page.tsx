@@ -45,6 +45,7 @@ export default function ManagerPortalPage() {
   const dragRef = useRef<DragState | null>(null);
   const dragStartedRef = useRef(false);
   const draggingEntryRef = useRef<ScheduleEntry | null>(null);
+  const scheduleLoadedWeekRef = useRef<string | null>(null);
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
@@ -61,10 +62,16 @@ export default function ManagerPortalPage() {
 
   // Fetch schedule for current week
   const loadSchedule = useCallback(() => {
-    setScheduleLoading(true);
+    if (scheduleLoadedWeekRef.current !== weekStart) {
+      setScheduleLoading(true);
+    }
     fetch(`/api/schedule?weekStart=${weekStart}`)
       .then((r) => r.json())
-      .then((data) => { setEntries(Array.isArray(data) ? data : []); setScheduleLoading(false); })
+      .then((data) => {
+        setEntries(Array.isArray(data) ? data : []);
+        setScheduleLoading(false);
+        scheduleLoadedWeekRef.current = weekStart;
+      })
       .catch(() => setScheduleLoading(false));
   }, [weekStart]);
 
