@@ -108,6 +108,12 @@ export default function ManagerPortalPage() {
   // Unique key per set (set names are not unique across locations)
   const setKey = (s: SheetRow) => `${s.location}::${s.setName}::${s.grouping}`;
 
+  // Keys of sets already scheduled this week
+  const scheduledThisWeek = useMemo(
+    () => new Set(entries.map((e) => `${e.location}::${e.set_name}::${e.grouping}`)),
+    [entries]
+  );
+
   // Toggle select a set
   const toggleSelect = (key: string) => {
     setSelected((prev) => {
@@ -414,6 +420,7 @@ export default function ManagerPortalPage() {
                 const colors = getLocationColor(s.location);
                 const key = setKey(s);
                 const isSelected = selected.has(key);
+                const isScheduled = scheduledThisWeek.has(key);
                 return (
                   <div
                     key={key}
@@ -424,6 +431,8 @@ export default function ManagerPortalPage() {
                     className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-grab active:cursor-grabbing transition-colors select-none ${
                       isSelected
                         ? 'bg-green-50 border border-green-300'
+                        : isScheduled
+                        ? 'bg-blue-50 border border-blue-200 hover:bg-blue-100'
                         : 'hover:bg-gray-50 border border-transparent'
                     }`}
                   >
@@ -437,6 +446,7 @@ export default function ManagerPortalPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1 min-w-0">
                         <span className="text-sm font-medium text-gray-800 truncate">{s.setName}</span>
+                        {isScheduled && <span className="flex-shrink-0 text-[10px] text-blue-600 font-semibold">✓</span>}
                         <span className={`flex-shrink-0 text-[10px] px-1.5 py-0 rounded-full border leading-tight ${colors.bg} ${colors.text} ${colors.border}`}>
                           {s.location}
                         </span>
