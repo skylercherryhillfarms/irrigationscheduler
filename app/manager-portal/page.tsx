@@ -385,16 +385,21 @@ export default function ManagerPortalPage() {
                 {groups.map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
-            <div className="flex gap-2 text-xs">
-              <button onClick={selectAll} className="text-green-700 hover:underline min-h-[36px] flex items-center">Select all</button>
-              <span className="text-gray-300 flex items-center">|</span>
-              <button onClick={() => { clearAll(); setFilterLocation(''); setFilterGroup(''); setSearch(''); }} className="text-gray-500 hover:underline min-h-[36px] flex items-center">Clear all</button>
-              <span className="text-gray-300 flex items-center">|</span>
-              <button onClick={() => loadSets(true)} disabled={setsLoading} className="text-blue-600 hover:underline disabled:opacity-50 min-h-[36px] flex items-center" title="Re-fetch sets from Google Sheet">
-                {setsLoading ? 'Loading…' : '↻ Refresh'}
-              </button>
+            <div className="flex flex-col gap-1 text-xs">
+              <div className="flex items-center gap-2">
+                <button onClick={selectAll} className="text-green-700 hover:underline min-h-[32px] flex items-center">Select all</button>
+                <span className="text-gray-300">|</span>
+                <button onClick={() => { clearAll(); setFilterLocation(''); setFilterGroup(''); setSearch(''); }} className="text-gray-500 hover:underline min-h-[32px] flex items-center">Clear all</button>
+                <span className="text-gray-300">|</span>
+                <button onClick={() => loadSets(true)} disabled={setsLoading} className="text-blue-600 hover:underline disabled:opacity-50 min-h-[32px] flex items-center" title="Re-fetch sets from Google Sheet">
+                  {setsLoading ? 'Loading…' : '↻ Refresh'}
+                </button>
+              </div>
               {selected.size > 0 && (
-                <span className="ml-auto text-green-700 font-semibold">{selected.size} selected</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-green-700 font-semibold">{selected.size} selected</span>
+                  <button onClick={clearAll} className="text-red-500 hover:underline">Clear selected</button>
+                </div>
               )}
             </div>
           </div>
