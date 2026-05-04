@@ -106,7 +106,7 @@ export default function ManagerPortalPage() {
   }, [allSets, search, filterGroup, filterLocation]);
 
   // Unique key per set (set names are not unique across locations)
-  const setKey = (s: SheetRow) => `${s.location}::${s.setName}`;
+  const setKey = (s: SheetRow) => `${s.location}::${s.setName}::${s.grouping}`;
 
   // Toggle select a set
   const toggleSelect = (key: string) => {
