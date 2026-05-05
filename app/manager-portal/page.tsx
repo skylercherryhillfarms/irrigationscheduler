@@ -687,8 +687,8 @@ function ShiftSection({
         if (!e.currentTarget.contains(e.relatedTarget as Node)) setInsertBeforeId(null);
       }}
     >
-      <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
-      <div className="p-1 space-y-px">
+      <div className={`text-xs font-bold px-2 py-0.5 border-b sticky top-0 z-10 ${labelStyle}`}>{label}</div>
+      <div className="p-1 space-y-px max-h-56 overflow-y-auto">
         {entries.map((e) => {
           const colors = getLocationColor(e.location);
           const setInfo = setsMap.get(`${e.location}::${e.set_name}`);
