@@ -535,7 +535,7 @@ export default function ManagerPortalPage() {
 
         {/* CALENDAR */}
         <div className="flex-1 overflow-x-auto overflow-y-auto">
-          <div className="min-w-[900px] h-full flex gap-1 p-2">
+          <div className="min-w-[900px] flex gap-1 p-2 items-start">
             {Array.from({ length: 7 }, (_, dayIndex) => {
               const dayDate = weekDays[dayIndex];
               const isOver = dragOverDay === dayIndex;
@@ -561,7 +561,7 @@ export default function ManagerPortalPage() {
                   {/* Day header */}
                   <div
                     style={{ backgroundColor: '#27500A' }}
-                    className="text-white text-center py-2 px-1 rounded-t-xl"
+                    className="text-white text-center py-2 px-1 rounded-t-xl sticky top-0 z-10"
                   >
                     <div className="font-bold text-sm">{DAYS[dayIndex]}</div>
                     <div className="text-green-200 text-xs">{format(dayDate, 'MMM d')}</div>
@@ -570,7 +570,7 @@ export default function ManagerPortalPage() {
                   {scheduleLoading ? (
                     <div className="flex-1 flex items-center justify-center text-gray-300 text-xs">…</div>
                   ) : (
-                    <div className="flex-1 flex flex-col overflow-y-auto p-1 gap-1">
+                    <div className="flex flex-col p-1 gap-1">
                       {/* AM drop zone */}
                       <div
                         onDrop={(e) => handleDropOnShift(e, dayIndex, 'AM')}
@@ -687,8 +687,8 @@ function ShiftSection({
         if (!e.currentTarget.contains(e.relatedTarget as Node)) setInsertBeforeId(null);
       }}
     >
-      <div className={`text-xs font-bold px-2 py-0.5 border-b sticky top-0 z-10 ${labelStyle}`}>{label}</div>
-      <div className="p-1 space-y-px max-h-56 overflow-y-auto">
+      <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
+      <div className="p-1 space-y-px">
         {entries.map((e) => {
           const colors = getLocationColor(e.location);
           const setInfo = setsMap.get(`${e.location}::${e.set_name}`);
