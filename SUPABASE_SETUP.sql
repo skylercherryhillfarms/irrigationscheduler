@@ -17,6 +17,17 @@ CREATE TABLE IF NOT EXISTS schedule_entries (
 -- Index for fast week lookups
 CREATE INDEX IF NOT EXISTS idx_schedule_week ON schedule_entries(week_start);
 
+-- Location notes (persistent per-location notes shown on master schedule)
+CREATE TABLE IF NOT EXISTS location_notes (
+  location TEXT PRIMARY KEY,
+  notes TEXT DEFAULT ''
+);
+
+ALTER TABLE location_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all" ON location_notes
+  FOR ALL USING (true) WITH CHECK (true);
+
 -- Enable Row Level Security (allow public read/write for this app)
 ALTER TABLE schedule_entries ENABLE ROW LEVEL SECURITY;
 

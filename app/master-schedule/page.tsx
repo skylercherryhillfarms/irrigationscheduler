@@ -14,6 +14,7 @@ export default function MasterSchedulePage() {
   const [loading, setLoading] = useState(true);
   const [filterLocation, setFilterLocation] = useState('');
   const [search, setSearch] = useState('');
+  const [locationNotes, setLocationNotes] = useState('');
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
@@ -30,6 +31,14 @@ export default function MasterSchedulePage() {
   }, [weekStart]);
 
   useEffect(() => { loadSchedule(); }, [loadSchedule]);
+
+  useEffect(() => {
+    if (!filterLocation) { setLocationNotes(''); return; }
+    fetch(`/api/location-notes?location=${encodeURIComponent(filterLocation)}`)
+      .then((r) => r.json())
+      .then((d) => setLocationNotes(d.notes ?? ''))
+      .catch(() => setLocationNotes(''));
+  }, [filterLocation]);
 
   // Realtime: reflect changes made by other managers immediately
   useEffect(() => {
@@ -181,6 +190,24 @@ export default function MasterSchedulePage() {
           })}
         </div>
       </div>
+
+      {/* Location notes — only shown when a location is filtered */}
+      {filterLocation && (
+        <div className="flex-shrink-0 px-4 pb-4 pt-2">
+          <div className="max-w-2xl">
+            <div className="text-sm font-semibold text-gray-700 mb-1">{filterLocation} Notes</div>
+            {locationNotes ? (
+              <div className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 bg-white whitespace-pre-wrap">
+                {locationNotes}
+              </div>
+            ) : (
+              <div className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-400 bg-white italic">
+                No notes for {filterLocation}.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
     </>
   );

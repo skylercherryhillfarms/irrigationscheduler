@@ -4,8 +4,6 @@ import { useState } from 'react';
 import { SheetRow } from '@/lib/types';
 import { DAYS } from '@/lib/types';
 
-const NOTE_PRESETS = ['Fertilize', 'Iron', 'Pesticide', 'Check valves', 'Flush lines', 'Maintenance'];
-
 interface Props {
   sets: SheetRow[];
   dayIndex?: number;
@@ -17,17 +15,9 @@ interface Props {
 
 export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift, onConfirm, onClose }: Props) {
   const [shift, setShift] = useState<'AM' | 'PM' | 'Both'>(defaultShift ?? 'AM');
-  const [notes, setNotes] = useState('');
   const [selectedDay, setSelectedDay] = useState<number | null>(dayIndex ?? null);
 
   const needsDayPicker = dayIndex === undefined;
-
-  const handlePreset = (p: string) => {
-    setNotes((prev) => {
-      if (prev.includes(p)) return prev.replace(p, '').replace(/,\s*,/, ',').replace(/^,\s*|,\s*$/, '').trim();
-      return prev ? `${prev}, ${p}` : p;
-    });
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -103,33 +93,6 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift,
             </div>
           </div>
 
-          {/* Notes presets */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Treatment Notes (optional)</label>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {NOTE_PRESETS.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => handlePreset(p)}
-                  className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
-                    notes.includes(p)
-                      ? 'bg-purple-100 text-purple-800 border-purple-400'
-                      : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Custom note…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-green-600"
-            />
-          </div>
-
           {/* Actions */}
           <div className="flex gap-3 pt-1">
             <button
@@ -139,7 +102,7 @@ export default function ScheduleModal({ sets, dayIndex, weekStart, defaultShift,
               Cancel
             </button>
             <button
-              onClick={() => { if (selectedDay !== null) onConfirm(selectedDay, shift, notes); }}
+              onClick={() => { if (selectedDay !== null) onConfirm(selectedDay, shift, ''); }}
               disabled={selectedDay === null}
               style={{ backgroundColor: '#27500A' }}
               className="flex-1 py-2.5 rounded-lg text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-default"

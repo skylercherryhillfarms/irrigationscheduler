@@ -31,6 +31,9 @@ export default function ManagerPortalPage() {
   const [copyMsg, setCopyMsg] = useState('');
   const [copyLocation, setCopyLocation] = useState('');
   const [copyTargetWeek, setCopyTargetWeek] = useState('');
+  const [locationNotes, setLocationNotes] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sidebar open state (collapsed by default on mobile)
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -88,6 +91,29 @@ export default function ManagerPortalPage() {
     return () => { supabase.removeChannel(channel); };
   }, [weekStart, loadSchedule]);
 
+  // Fetch/clear location notes when filter changes
+  useEffect(() => {
+    if (!filterLocation) { setLocationNotes(''); return; }
+    fetch(`/api/location-notes?location=${encodeURIComponent(filterLocation)}`)
+      .then((r) => r.json())
+      .then((d) => setLocationNotes(d.notes ?? ''))
+      .catch(() => setLocationNotes(''));
+  }, [filterLocation]);
+
+  const handleNotesChange = (value: string) => {
+    setLocationNotes(value);
+    if (notesSaveTimer.current) clearTimeout(notesSaveTimer.current);
+    notesSaveTimer.current = setTimeout(async () => {
+      setNotesSaving(true);
+      await fetch('/api/location-notes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: filterLocation, notes: value }),
+      });
+      setNotesSaving(false);
+    }, 1000);
+  };
+
   // Groups and locations for filters
   const locations = useMemo(() => [...new Set(allSets.map((s) => s.location.trim()).filter(Boolean))].sort(), [allSets]);
   const groups = useMemo(() => {
@@ -130,7 +156,7 @@ export default function ManagerPortalPage() {
   // Get sets to schedule: if dragging a set that's in selection, use selection; otherwise just that set
   const getSetsToSchedule = (draggedKey: string): SheetRow[] => {
     if (selected.has(draggedKey) && selected.size > 1) {
-      return allSets.filter((s) => selected.has(setKey(s)));
+      return filteredSets.filter((s) => selected.has(setKey(s)));
     }
     return allSets.filter((s) => setKey(s) === draggedKey);
   };
@@ -487,6 +513,22 @@ export default function ManagerPortalPage() {
               >
                 Schedule {selected.size} selected set{selected.size !== 1 ? 's' : ''} →
               </button>
+            </div>
+          )}
+          {/* Location notes — only shown when a location is filtered */}
+          {filterLocation && (
+            <div className="flex-shrink-0 p-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-gray-600">{filterLocation} Notes</span>
+                {notesSaving && <span className="text-[10px] text-gray-400">Saving…</span>}
+              </div>
+              <textarea
+                value={locationNotes}
+                onChange={(e) => handleNotesChange(e.target.value)}
+                placeholder={`Notes for ${filterLocation}…`}
+                rows={4}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 resize-none focus:outline-none focus:ring-2 focus:ring-green-600"
+              />
             </div>
           )}
         </aside>
