@@ -13,8 +13,15 @@ export default function MasterSchedulePage() {
   const [sets, setSets] = useState<SheetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterLocation, setFilterLocation] = useState('');
+  const [filterCrop, setFilterCrop] = useState('');
   const [search, setSearch] = useState('');
   const [locationNotes, setLocationNotes] = useState('');
+
+  const getCropPrefix = (block: string | undefined): string => {
+    if (!block?.trim()) return 'blank';
+    const match = block.trim().match(/^([A-Za-z]+)/);
+    return match ? match[1].toUpperCase() : 'other';
+  };
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
@@ -60,14 +67,30 @@ export default function MasterSchedulePage() {
 
   const locations = useMemo(() => [...new Set(entries.map((e) => e.location).filter(Boolean))].sort(), [entries]);
 
-  // Filter entries by location + search
+  const crops = useMemo(() => {
+    const prefixes = new Set<string>();
+    for (const e of entries) {
+      const block = setsMap.get(`${e.location}::${e.set_name}`)?.block;
+      prefixes.add(getCropPrefix(block));
+    }
+    const sorted = [...prefixes].filter((p) => p !== 'blank' && p !== 'other').sort();
+    if (prefixes.has('blank')) sorted.push('blank');
+    if (prefixes.has('other')) sorted.push('other');
+    return sorted;
+  }, [entries, setsMap]);
+
+  // Filter entries by location + crop + search
   const visibleEntries = useMemo(() => {
     return entries.filter((e) => {
       if (filterLocation && e.location !== filterLocation) return false;
+      if (filterCrop) {
+        const block = setsMap.get(`${e.location}::${e.set_name}`)?.block;
+        if (getCropPrefix(block) !== filterCrop) return false;
+      }
       if (search && !e.set_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [entries, filterLocation, search]);
+  }, [entries, filterLocation, filterCrop, search, setsMap]);
 
   // Build day → entries map from visible entries
   const dayEntriesMap = useMemo(() => {
@@ -136,8 +159,16 @@ export default function MasterSchedulePage() {
               <option value="" className="text-gray-800">All Locations</option>
               {locations.map((l) => <option key={l} value={l} className="text-gray-800">{l}</option>)}
             </select>
-            {(filterLocation || search) && (
-              <button onClick={() => { setFilterLocation(''); setSearch(''); }} className="text-xs text-white/70 hover:text-white underline">
+            <select
+              value={filterCrop}
+              onChange={(e) => setFilterCrop(e.target.value)}
+              className="border border-white/30 rounded-lg px-2 py-1.5 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+            >
+              <option value="" className="text-gray-800">All Crops</option>
+              {crops.map((c) => <option key={c} value={c} className="text-gray-800">{c}</option>)}
+            </select>
+            {(filterLocation || filterCrop || search) && (
+              <button onClick={() => { setFilterLocation(''); setFilterCrop(''); setSearch(''); }} className="text-xs text-white/70 hover:text-white underline">
                 Clear
               </button>
             )}
