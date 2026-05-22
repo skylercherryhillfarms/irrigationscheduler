@@ -14,6 +14,7 @@ export default function MasterSchedulePage() {
   const [loading, setLoading] = useState(true);
   const [filterLocation, setFilterLocation] = useState('');
   const [filterCrop, setFilterCrop] = useState('');
+  const [filterBlock, setFilterBlock] = useState('');
   const [search, setSearch] = useState('');
   const [locationNotes, setLocationNotes] = useState('');
 
@@ -67,9 +68,11 @@ export default function MasterSchedulePage() {
 
   const locations = useMemo(() => [...new Set(entries.map((e) => e.location).filter(Boolean))].sort(), [entries]);
 
+  // Crops filtered by selected location
   const crops = useMemo(() => {
+    const source = filterLocation ? entries.filter((e) => e.location === filterLocation) : entries;
     const prefixes = new Set<string>();
-    for (const e of entries) {
+    for (const e of source) {
       const block = setsMap.get(`${e.location}::${e.set_name}`)?.block;
       prefixes.add(getCropPrefix(block));
     }
@@ -77,7 +80,25 @@ export default function MasterSchedulePage() {
     if (prefixes.has('blank')) sorted.push('blank');
     if (prefixes.has('other')) sorted.push('other');
     return sorted;
-  }, [entries, setsMap]);
+  }, [entries, setsMap, filterLocation]);
+
+  // Blocks filtered by selected location + crop
+  const blocks = useMemo(() => {
+    const source = entries.filter((e) => {
+      if (filterLocation && e.location !== filterLocation) return false;
+      if (filterCrop) {
+        const block = setsMap.get(`${e.location}::${e.set_name}`)?.block;
+        if (getCropPrefix(block) !== filterCrop) return false;
+      }
+      return true;
+    });
+    const vals = new Set<string>();
+    for (const e of source) {
+      const block = setsMap.get(`${e.location}::${e.set_name}`)?.block?.trim();
+      if (block) vals.add(block);
+    }
+    return [...vals].sort();
+  }, [entries, setsMap, filterLocation, filterCrop]);
 
   // Filter entries by location + crop + search
   const visibleEntries = useMemo(() => {
@@ -87,10 +108,14 @@ export default function MasterSchedulePage() {
         const block = setsMap.get(`${e.location}::${e.set_name}`)?.block;
         if (getCropPrefix(block) !== filterCrop) return false;
       }
+      if (filterBlock) {
+        const block = setsMap.get(`${e.location}::${e.set_name}`)?.block?.trim();
+        if (block !== filterBlock) return false;
+      }
       if (search && !e.set_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [entries, filterLocation, filterCrop, search, setsMap]);
+  }, [entries, filterLocation, filterCrop, filterBlock, search, setsMap]);
 
   // Build day → entries map from visible entries
   const dayEntriesMap = useMemo(() => {
@@ -153,7 +178,7 @@ export default function MasterSchedulePage() {
             />
             <select
               value={filterLocation}
-              onChange={(e) => setFilterLocation(e.target.value)}
+              onChange={(e) => { setFilterLocation(e.target.value); setFilterCrop(''); setFilterBlock(''); }}
               className="border border-white/30 rounded-lg px-2 py-1.5 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
             >
               <option value="" className="text-gray-800">All Locations</option>
@@ -161,14 +186,22 @@ export default function MasterSchedulePage() {
             </select>
             <select
               value={filterCrop}
-              onChange={(e) => setFilterCrop(e.target.value)}
+              onChange={(e) => { setFilterCrop(e.target.value); setFilterBlock(''); }}
               className="border border-white/30 rounded-lg px-2 py-1.5 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
             >
               <option value="" className="text-gray-800">All Crops</option>
               {crops.map((c) => <option key={c} value={c} className="text-gray-800">{c}</option>)}
             </select>
-            {(filterLocation || filterCrop || search) && (
-              <button onClick={() => { setFilterLocation(''); setFilterCrop(''); setSearch(''); }} className="text-xs text-white/70 hover:text-white underline">
+            <select
+              value={filterBlock}
+              onChange={(e) => setFilterBlock(e.target.value)}
+              className="border border-white/30 rounded-lg px-2 py-1.5 text-sm bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-white/50"
+            >
+              <option value="" className="text-gray-800">All Blocks</option>
+              {blocks.map((b) => <option key={b} value={b} className="text-gray-800">{b}</option>)}
+            </select>
+            {(filterLocation || filterCrop || filterBlock || search) && (
+              <button onClick={() => { setFilterLocation(''); setFilterCrop(''); setFilterBlock(''); setSearch(''); }} className="text-xs text-white/70 hover:text-white underline">
                 Clear
               </button>
             )}
