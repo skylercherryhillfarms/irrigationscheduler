@@ -191,7 +191,11 @@ export default function ManagerPortalPage() {
     const setsToSchedule = dragRef.current?.sets ?? [];
     if (setsToSchedule.length === 0) { setModal(null); return; }
 
-    const toInsert = setsToSchedule.map((s) => ({
+    // Find the next available position in this day/shift slot
+    const existing = entries.filter((e) => e.day_of_week === dayIndex && (e.shift === shift || shift === 'Both' || e.shift === 'Both'));
+    const maxPos = existing.reduce((max, e) => Math.max(max, e.position ?? -1), -1);
+
+    const toInsert = setsToSchedule.map((s, i) => ({
       week_start: weekStart,
       set_name: s.setName,
       location: s.location,
@@ -201,6 +205,7 @@ export default function ManagerPortalPage() {
       day_of_week: dayIndex,
       shift,
       notes: notes.trim(),
+      position: maxPos + 1 + i,
     }));
 
     try {
@@ -310,7 +315,13 @@ export default function ManagerPortalPage() {
   }, [entries, filterLocation]);
 
   const getDayShiftEntries = (dayIndex: number, shift: 'AM' | 'PM') =>
-    (dayEntriesMap.get(dayIndex) ?? []).filter((e) => e.shift === shift || e.shift === 'Both');
+    (dayEntriesMap.get(dayIndex) ?? [])
+      .filter((e) => e.shift === shift || e.shift === 'Both')
+      .sort((a, b) => {
+        const locCmp = a.location.localeCompare(b.location);
+        if (locCmp !== 0) return locCmp;
+        return (a.position ?? Infinity) - (b.position ?? Infinity);
+      });
 
   return (
     <div className="h-screen overflow-hidden flex flex-col" style={{ backgroundColor: '#f8faf4' }}>
