@@ -17,6 +17,7 @@ export default function MasterSchedulePage() {
   const [filterBlock, setFilterBlock] = useState('');
   const [search, setSearch] = useState('');
   const [locationNotes, setLocationNotes] = useState('');
+  const [slotTimes, setSlotTimes] = useState<Record<string, string>>({});
 
   const getCropPrefix = (block: string | undefined): string => {
     if (!block?.trim()) return 'blank';
@@ -47,6 +48,18 @@ export default function MasterSchedulePage() {
       .then((d) => setLocationNotes(d.notes ?? ''))
       .catch(() => setLocationNotes(''));
   }, [filterLocation]);
+
+  useEffect(() => {
+    if (!filterLocation) { setSlotTimes({}); return; }
+    fetch(`/api/slot-times?location=${encodeURIComponent(filterLocation)}&weekStart=${weekStart}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const map: Record<string, string> = {};
+        for (const t of d.times ?? []) map[`${t.day_of_week}-${t.shift}`] = t.start_time ?? '';
+        setSlotTimes(map);
+      })
+      .catch(() => setSlotTimes({}));
+  }, [filterLocation, weekStart]);
 
   // Realtime: reflect changes made by other managers immediately
   useEffect(() => {
@@ -242,8 +255,8 @@ export default function MasterSchedulePage() {
                   <div className="flex-1 flex items-center justify-center text-gray-300 text-xs">…</div>
                 ) : (
                   <div className="flex flex-col p-1 gap-1">
-                    <ShiftSection label="AM" entries={amEntries} setsMap={setsMap} />
-                    <ShiftSection label="PM" entries={pmEntries} setsMap={setsMap} />
+                    <ShiftSection label="AM" entries={amEntries} setsMap={setsMap} timeValue={filterLocation ? (slotTimes[`${dayIndex}-AM`] ?? '') : ''} />
+                    <ShiftSection label="PM" entries={pmEntries} setsMap={setsMap} timeValue={filterLocation ? (slotTimes[`${dayIndex}-PM`] ?? '') : ''} />
                     {amEntries.length === 0 && pmEntries.length === 0 && (
                       <div className="flex-1 flex items-center justify-center text-gray-300 text-xs py-4">—</div>
                     )}
@@ -281,10 +294,12 @@ function ShiftSection({
   label,
   entries,
   setsMap,
+  timeValue,
 }: {
   label: 'AM' | 'PM';
   entries: ScheduleEntry[];
   setsMap: Map<string, SheetRow>;
+  timeValue: string;
 }) {
   const labelStyle = label === 'AM'
     ? 'bg-sky-100 text-sky-700 border-sky-200'
@@ -294,7 +309,10 @@ function ShiftSection({
 
   return (
     <div className="rounded-lg border border-gray-100 overflow-hidden">
-      <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
+      <div className={`flex items-center justify-between gap-1 text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>
+        <span>{label}</span>
+        {timeValue && <span className="font-semibold">{timeValue}</span>}
+      </div>
       <div className="space-y-px p-1">
         {entries.map((e) => {
           const colors = getLocationColor(e.location);

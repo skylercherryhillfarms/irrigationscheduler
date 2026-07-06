@@ -34,6 +34,9 @@ export default function ManagerPortalPage() {
   const [locationNotes, setLocationNotes] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
   const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-slot start times, keyed by `${dayIndex}-${shift}`
+  const [slotTimes, setSlotTimes] = useState<Record<string, string>>({});
+  const slotSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // Sidebar open state (collapsed by default on mobile)
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -48,7 +51,18 @@ export default function ManagerPortalPage() {
   const dragRef = useRef<DragState | null>(null);
   const dragStartedRef = useRef(false);
   const draggingEntryRef = useRef<ScheduleEntry | null>(null);
+  const draggingGroupRef = useRef<string[] | null>(null);
   const scheduleLoadedWeekRef = useRef<string | null>(null);
+
+  // Multi-select of already-scheduled calendar entries
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
+  const toggleEntry = useCallback((id: string) => {
+    setSelectedEntries((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
@@ -112,6 +126,35 @@ export default function ManagerPortalPage() {
       });
       setNotesSaving(false);
     }, 1000);
+  };
+
+  // Clear entry selection when the week or location filter changes
+  useEffect(() => { setSelectedEntries(new Set()); }, [weekStart, filterLocation]);
+
+  // Fetch/clear slot start times when location or week changes
+  useEffect(() => {
+    if (!filterLocation) { setSlotTimes({}); return; }
+    fetch(`/api/slot-times?location=${encodeURIComponent(filterLocation)}&weekStart=${weekStart}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const map: Record<string, string> = {};
+        for (const t of d.times ?? []) map[`${t.day_of_week}-${t.shift}`] = t.start_time ?? '';
+        setSlotTimes(map);
+      })
+      .catch(() => setSlotTimes({}));
+  }, [filterLocation, weekStart]);
+
+  const handleSlotTimeChange = (dayIndex: number, shift: 'AM' | 'PM', value: string) => {
+    const key = `${dayIndex}-${shift}`;
+    setSlotTimes((prev) => ({ ...prev, [key]: value }));
+    if (slotSaveTimers.current[key]) clearTimeout(slotSaveTimers.current[key]);
+    slotSaveTimers.current[key] = setTimeout(() => {
+      fetch('/api/slot-times', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: filterLocation, weekStart, dayOfWeek: dayIndex, shift, startTime: value }),
+      });
+    }, 800);
   };
 
   // Groups and locations for filters
@@ -229,12 +272,35 @@ export default function ManagerPortalPage() {
     loadSchedule();
   };
 
-  const handleMoveEntry = async (id: string, dayIndex: number, shift: 'AM' | 'PM') => {
-    await fetch(`/api/schedule?id=${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ day_of_week: dayIndex, shift, position: null }),
-    });
+  const handleDeleteSelected = async () => {
+    const ids = [...selectedEntries];
+    if (ids.length === 0) return;
+    await Promise.all(ids.map((id) => fetch(`/api/schedule?id=${id}`, { method: 'DELETE' })));
+    setSelectedEntries(new Set());
+    loadSchedule();
+  };
+
+  // Move one or more entries to a day/shift, appending them in their current order
+  const handleMoveEntries = async (ids: string[], dayIndex: number, shift: 'AM' | 'PM') => {
+    const idSet = new Set(ids);
+    // Preserve the entries' existing sorted order (API returns them ordered)
+    const ordered = entries.filter((e) => idSet.has(e.id)).map((e) => e.id);
+    if (ordered.length === 0) return;
+    // Start after any entries already in the target slot (excluding the ones we're moving)
+    const existing = entries.filter(
+      (e) => e.day_of_week === dayIndex && (e.shift === shift || e.shift === 'Both') && !idSet.has(e.id)
+    );
+    const maxPos = existing.reduce((max, e) => Math.max(max, e.position ?? -1), -1);
+    await Promise.all(
+      ordered.map((id, i) =>
+        fetch(`/api/schedule?id=${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day_of_week: dayIndex, shift, position: maxPos + 1 + i }),
+        })
+      )
+    );
+    setSelectedEntries(new Set());
     loadSchedule();
   };
 
@@ -253,14 +319,13 @@ export default function ManagerPortalPage() {
     setDragOverShift(null);
     setDragOverDay(null);
 
-    // Existing scheduled entry being moved
-    const entryData = e.dataTransfer.getData('existingEntry');
-    if (entryData) {
+    // Existing scheduled entries being moved (one or many)
+    const groupData = e.dataTransfer.getData('existingEntries');
+    if (groupData) {
       try {
-        const entry: ScheduleEntry = JSON.parse(entryData);
-        handleMoveEntry(entry.id, dayIndex, shift);
+        const ids: string[] = JSON.parse(groupData);
+        if (ids.length) { handleMoveEntries(ids, dayIndex, shift); return; }
       } catch {}
-      return;
     }
 
     // Sidebar set being dropped — open modal with shift pre-filled
@@ -598,6 +663,12 @@ export default function ManagerPortalPage() {
                           gpmTotal={genolaGPM_AM > 0 ? genolaGPM_AM : null}
                           acresTotal={charliesAcres_AM > 0 ? charliesAcres_AM : null}
                           setsMap={setsMap}
+                          showTime={!!filterLocation}
+                          timeValue={slotTimes[`${dayIndex}-AM`] ?? ''}
+                          onTimeChange={(v) => handleSlotTimeChange(dayIndex, 'AM', v)}
+                          selectedEntries={selectedEntries}
+                          onToggleSelect={toggleEntry}
+                          draggingGroupRef={draggingGroupRef}
                         />
                       </div>
                       {/* PM drop zone */}
@@ -616,6 +687,12 @@ export default function ManagerPortalPage() {
                           gpmTotal={genolaGPM_PM > 0 ? genolaGPM_PM : null}
                           acresTotal={charliesAcres_PM > 0 ? charliesAcres_PM : null}
                           setsMap={setsMap}
+                          showTime={!!filterLocation}
+                          timeValue={slotTimes[`${dayIndex}-PM`] ?? ''}
+                          onTimeChange={(v) => handleSlotTimeChange(dayIndex, 'PM', v)}
+                          selectedEntries={selectedEntries}
+                          onToggleSelect={toggleEntry}
+                          draggingGroupRef={draggingGroupRef}
                         />
                       </div>
 
@@ -644,6 +721,16 @@ export default function ManagerPortalPage() {
           onClose={() => { setModal(null); dragRef.current = null; }}
         />
       )}
+
+      {/* Multi-select action pill */}
+      {selectedEntries.size > 1 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-green-800 text-white rounded-full shadow-lg px-4 py-2 text-sm">
+          <span className="font-semibold">{selectedEntries.size} selected</span>
+          <span className="text-green-300 text-xs">drag any to move all</span>
+          <button onClick={handleDeleteSelected} className="bg-red-500 hover:bg-red-600 text-white rounded-full px-3 py-1 text-xs font-semibold transition-colors">Delete</button>
+          <button onClick={() => setSelectedEntries(new Set())} className="text-white/80 hover:text-white underline text-xs">Clear</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -657,6 +744,12 @@ function ShiftSection({
   gpmTotal,
   acresTotal,
   setsMap,
+  showTime,
+  timeValue,
+  onTimeChange,
+  selectedEntries,
+  onToggleSelect,
+  draggingGroupRef,
 }: {
   label: 'AM' | 'PM';
   entries: ScheduleEntry[];
@@ -666,6 +759,12 @@ function ShiftSection({
   gpmTotal: number | null;
   acresTotal: number | null;
   setsMap: Map<string, SheetRow>;
+  showTime: boolean;
+  timeValue: string;
+  onTimeChange: (value: string) => void;
+  selectedEntries: Set<string>;
+  onToggleSelect: (id: string) => void;
+  draggingGroupRef: { current: string[] | null };
 }) {
   const [insertBeforeId, setInsertBeforeId] = useState<string | 'end' | null>(null);
 
@@ -698,7 +797,20 @@ function ShiftSection({
         if (!e.currentTarget.contains(e.relatedTarget as Node)) setInsertBeforeId(null);
       }}
     >
-      <div className={`text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>{label}</div>
+      <div className={`flex items-center justify-between gap-1 text-xs font-bold px-2 py-0.5 border-b ${labelStyle}`}>
+        <span>{label}</span>
+        {showTime && (
+          <input
+            type="text"
+            value={timeValue}
+            onChange={(e) => onTimeChange(e.target.value)}
+            placeholder="start"
+            draggable
+            onDragStart={(e) => e.preventDefault()}
+            className="w-28 text-right bg-white/50 rounded px-1 py-0 text-xs font-semibold placeholder:font-normal placeholder:text-current/40 focus:outline-none focus:ring-1 focus:ring-current/40"
+          />
+        )}
+      </div>
       <div className="p-1 space-y-px">
         {entries.map((e) => {
           const colors = getLocationColor(e.location);
@@ -714,17 +826,24 @@ function ShiftSection({
               )}
               <div
                 draggable
+                onClick={(ev) => { ev.stopPropagation(); onToggleSelect(e.id); }}
                 onDragStart={(ev) => {
                   ev.stopPropagation();
-                  ev.dataTransfer.setData('existingEntry', JSON.stringify(e));
+                  const isGroup = selectedEntries.has(e.id) && selectedEntries.size > 1;
+                  const ids = isGroup ? [...selectedEntries] : [e.id];
+                  ev.dataTransfer.setData('existingEntries', JSON.stringify(ids));
                   ev.dataTransfer.effectAllowed = 'move';
                   draggingEntryRef.current = e;
+                  draggingGroupRef.current = isGroup ? ids : null;
                 }}
                 onDragEnd={() => {
                   draggingEntryRef.current = null;
+                  draggingGroupRef.current = null;
                   setInsertBeforeId(null);
                 }}
                 onDragOver={(ev) => {
+                  // Group drags bubble to the shift drop zone (move, not reorder)
+                  if (draggingGroupRef.current) return;
                   if (!isDraggingInThisSection()) return;
                   ev.preventDefault();
                   ev.stopPropagation();
@@ -732,13 +851,16 @@ function ShiftSection({
                   if (insertBeforeId !== newId) setInsertBeforeId(newId);
                 }}
                 onDrop={(ev) => {
+                  if (draggingGroupRef.current) return;
                   if (!isDraggingInThisSection()) return;
                   ev.preventDefault();
                   ev.stopPropagation();
                   setInsertBeforeId(null);
                   onReorder(getNewOrder(e.id));
                 }}
-                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing ${isVenueEvent ? 'border border-yellow-400/50' : 'bg-gray-50'}`}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 group overflow-hidden cursor-grab active:cursor-grabbing ${
+                  selectedEntries.has(e.id) ? 'ring-2 ring-green-500 ' : ''
+                }${isVenueEvent ? 'border border-yellow-400/50' : selectedEntries.has(e.id) ? 'bg-green-50' : 'bg-gray-50'}`}
                 style={isVenueEvent ? { background: 'radial-gradient(circle at 15% 50%, rgba(255,215,0,0.4) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(255,80,180,0.35) 0%, transparent 40%), radial-gradient(circle at 55% 85%, rgba(100,180,255,0.3) 0%, transparent 35%), #0d0a1e' } : undefined}
                 title={fullTitle}
               >
@@ -768,7 +890,7 @@ function ShiftSection({
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-400" title={e.notes} />
                   )}
                   <button
-                    onClick={() => onDelete(e.id)}
+                    onClick={(ev) => { ev.stopPropagation(); onDelete(e.id); }}
                     className={`text-sm leading-none md:opacity-0 md:group-hover:opacity-100 transition-colors ${isVenueEvent ? 'text-yellow-300/50 hover:text-red-400' : 'text-gray-300 hover:text-red-500'}`}
                     title="Remove"
                   >
